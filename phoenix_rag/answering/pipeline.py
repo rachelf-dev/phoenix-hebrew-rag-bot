@@ -16,7 +16,7 @@ from ..indexing.store import VectorIndex
 from ..logging_utils import log_query
 from .boundaries import detect
 from .generate import generate_answer, rewrite_question
-from .rerank import drop_weak_hits, promote_topic_hits
+from .rerank import demote_mismatched_paths, drop_weak_hits, promote_topic_hits
 from .rerank import rerank as cohere_rerank
 
 log = logging.getLogger(__name__)
@@ -150,6 +150,7 @@ class Pipeline:
             threshold=float(rcfg.get("relevance_threshold") or 0.0),
             max_per_url=int(rcfg.get("max_per_url") or 2),
         )
+        hits = demote_mismatched_paths(rewritten, hits)
         used_rerank = False
         keep = int((rcfg.get("rerank") or {}).get("top_n") or 5)
         if do_rerank and hits:
@@ -162,6 +163,7 @@ class Pipeline:
             )
             used_rerank = any(h.rerank_score for h in hits)
             hits = drop_weak_hits(hits)
+            hits = demote_mismatched_paths(rewritten, hits)
         hits = promote_topic_hits(rewritten, hits)[:keep]
 
         gen_q = rewritten

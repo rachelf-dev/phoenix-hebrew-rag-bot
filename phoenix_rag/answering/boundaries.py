@@ -95,6 +95,17 @@ _ON_TOPIC = (
     "פרטים אישיים",
     "עדכון פרטים",
     "מעדכנים",
+    # English insurance queries (spec: answer in Hebrew, still on-topic)
+    "insurance",
+    "travel",
+    "claim",
+    "policy",
+    "phoenix",
+    "extend",
+    "abroad",
+    "coverage",
+    "car",
+    "health",
 )
 
 

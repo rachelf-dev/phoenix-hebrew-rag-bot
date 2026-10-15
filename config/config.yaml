@@ -95,11 +95,10 @@ llm:
   # Instruction at answer time: reply only from retrieved chunks, else the not_found message.
 
 evaluation:
-  # Toolkit success metric is "doesn't invent", not "sounds fluent".
-  grounded: 20               # questions whose answer is on fnx.co.il (must cite a real URL)
-  unanswerable: 10           # questions that must yield messages.not_found — no guessing
-  path: config/eval.yaml     # 20 grounded + 10 unanswerable (step 4)
-  pause_seconds: 8           # stay under Gemini free-tier RPM during a 30-item run
+  # Day 4: 25 public + 5 hidden holdout in eval/questions.jsonl; legacy 20+10 in config/eval.yaml.
+  path: eval/questions.jsonl
+  legacy_path: config/eval.yaml
+  pause_seconds: 8           # stay under Gemini free-tier RPM during a full run
 
 messages:
   not_found: "המידע הזה לא מופיע באתר הפניקס. לבירור נוסף מומלץ לפנות לשירות הלקוחות של הפניקס."

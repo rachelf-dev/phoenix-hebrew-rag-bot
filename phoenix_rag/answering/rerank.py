@@ -46,7 +46,8 @@ def _url_path(hit: Hit) -> str:
 
 
 def _is_howto(question: str) -> bool:
-    return any(m in (question or "") for m in ("איך", "כיצד"))
+    q = (question or "").lower()
+    return any(m in q for m in ("איך", "כיצד", "how do", "how to", "how can"))
 
 
 def _is_define(question: str) -> bool:
@@ -136,6 +137,29 @@ def _canonical_product_hits(question: str, hits: list[Hit]) -> list[Hit]:
     scored.sort(key=lambda t: (t[0], t[1]), reverse=True)
     specific = [h for ov, n, h in scored if n >= 2]
     return specific or [h for _, _, h in scored]
+
+
+def demote_mismatched_paths(question: str, hits: list[Hit]) -> list[Hit]:
+    """Apartment/home questions should not rank business-liability pages first."""
+    q = question or ""
+    if "דירה" in q and "עסק" not in q:
+        bad_markers = (
+            "/claims-business-insurance/",
+            "/claims-liability-insurance/business",
+            "business-water",
+            "business-burglary",
+            "business-fire",
+        )
+        good, tail = [], []
+        for h in hits:
+            path = _url_path(h)
+            if any(m in path for m in bad_markers):
+                tail.append(h)
+            else:
+                good.append(h)
+        if good:
+            return good + tail
+    return hits
 
 
 def promote_topic_hits(question: str, hits: list[Hit], *, limit: int = 2) -> list[Hit]:

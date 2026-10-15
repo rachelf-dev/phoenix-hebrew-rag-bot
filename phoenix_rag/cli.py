@@ -9,7 +9,7 @@
     python -m phoenix_rag.cli compare-embeddings [--models ...]   # embedding bake-off on a Hebrew subset
     python -m phoenix_rag.cli ask "שאלה" [--json]              # one grounded answer (rerank + Gemini)
     python -m phoenix_rag.cli chat                             # interactive Hebrew chat
-    python -m phoenix_rag.cli eval                             # 20 grounded + 10 unanswerable
+    python -m phoenix_rag.cli eval                             # eval/questions.jsonl (legacy: config/eval.yaml)
     python -m phoenix_rag.cli scenarios                        # Day-3 A/B/C
     python -m phoenix_rag.cli serve [--port 7860]              # local chat UI
     python -m phoenix_rag.cli status               # store counts and last runs
@@ -504,7 +504,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--no-rerank", action="store_true")
     p.set_defaults(func=cmd_scenarios)
 
-    p = sub.add_parser("eval", help="run config/eval.yaml (grounded + unanswerable)")
+    p = sub.add_parser("eval", help="run evaluation set (eval/questions.jsonl by default)")
     p.add_argument("--limit", type=int, default=0, help="only the first N items (smoke)")
     p.add_argument("--no-rerank", action="store_true")
     p.set_defaults(func=cmd_eval)

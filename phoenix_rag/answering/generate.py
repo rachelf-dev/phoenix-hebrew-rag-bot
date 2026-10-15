@@ -34,6 +34,7 @@ SYSTEM = """אתה עוזר שעונה רק מתוך קטעי תוכן ציבו�
 8. דפי שירות עצמי לעדכון פרטים / הארכת פוליסה / שינוי מסלול הם תוכן ציבורי באתר — זה לא גישה לחשבון אישי. אם דף כזה מופיע בקטעים, status חייב להיות answered ו-citation_urls חייבות לכלול את כתובתו.
 9. כששואלים מה כולל מוצר / מה זה / למי מיועד — עדיף לצטט את דף המוצר עצמו (סוג "product") ולא מאמר הסבר או דף בית של התחום.
 10. כש-status הוא answered חובה לציין לפחות כתובת אחת ב-citation_urls.
+11. שאלה עם שני חלקים (למשל תביעת דירה + עדכון טלפון): ענה לכל חלק רק אם יש קטע מתאים; צטט כתובת לכל חלק. ב"דירה" — לא לצטט דפי עסק/business.
 החזר JSON בלבד במבנה:
 {"status":"answered"|"not_found","answer":"...","citation_urls":["https://..."]}
 כש-status הוא not_found, השאר את answer ריק."""
@@ -174,6 +175,9 @@ def generate_answer(question: str, hits: list[Hit], cfg: Config) -> dict[str, An
         log.warning("Gemini returned non-JSON")
         if extra:
             return _action_fallback(hits, extra)
+        action_urls = preferred_cite_urls(question, hits)
+        if action_urls:
+            return _action_fallback(hits, action_urls)
         return {"status": "not_found", "answer": "", "citation_urls": []}
     status = str(data.get("status") or "not_found").strip()
     if status not in ("answered", "not_found"):

@@ -2,7 +2,7 @@
 
 <!-- Hand-off note for the next chat session: what exists, what is blocked, and what to do next. Update when state changes. -->
 
-עודכן: 15/10/2026 18:25
+עודכן: 15/10/2026 19:25
 
 ## הפרויקט
 
@@ -58,11 +58,25 @@
 | שכתוב follow-up + גבול אישי גם ב-not_found | ✅ | `pipeline.py` |
 | CLI `--json` + `scenarios` A/B/C | ✅ | `python -m phoenix_rag.cli scenarios` |
 
-## הצעד הבא (יום 4+)
+## יום 4 — סט הערכה, מדדים, כיול
 
-1. סט הערכה 25 שאלות + כיול סף (יום 4 בתכנון).
-2. אופציונלי: `compare-embeddings` מול `gemini-embedding-001`.
-3. אריזה להגשה. הגמר 28/10.
+| שלב | מצב | היכן |
+|---|---|---|
+| 25 שאלות + 5 סמויות (jsonl) | ✅ | `eval/questions.jsonl` |
+| `scripts/eval.py` (מדדים + תוצאות) | ✅ | `eval/results/` |
+| כיול RRF (retrieval-only) | ✅ סף מוצע ~0.022 — **לא מופעל** | `relevance_threshold: 0.0` |
+| ריצה מלאה `after_tuned` | ✅ **30/30**, hallucination 0 | `eval/results/20261015T180807Z_after_tuned.json` |
+| כוונון | ✅ EN on-topic, how-to EN, demote business/דירה, c01 wording | `boundaries.py`, `rerank.py`, `generate.py` |
+
+```powershell
+python scripts/eval.py --tag after_tuned
+python -m phoenix_rag.cli eval
+```
+
+## הצעד הבא (יום 5+)
+
+1. הרצת סט מלא + טבלת before/after ב-`docs/SUMMARY.md` אחרי `--tag after`.
+2. Streamlit RTL + אריזה להגשה. הגמר 28/10.
 
 ## פקודות שימושיות
 
