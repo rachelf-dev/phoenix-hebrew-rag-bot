@@ -1,0 +1,64 @@
+# Evaluation set for the Phoenix answer layer.
+# Hackathon toolkit: success = "doesn't invent". Split is 20 grounded + 10 unanswerable.
+# Retrieval smoke tests stay in probe.yaml; this file is for full answer+citation checks.
+#
+# Each grounded item: the bot must answer from the site and cite a URL containing `expect`.
+# Each unanswerable item: the bot must refuse (not_found / out_of_scope / no_account) — no guessing.
+
+grounded:
+  - q: "יש לי נזילה בבית, איך מגישים תביעה?"
+    expect:
+      - "/claims-customer-service/claims-appartment-insurance/pipeline-damage/"
+      - "/claims-customer-service/claims-appartment-insurance/damage-to-the-apartment/"
+  - q: "איך מגישים תביעה על נזק למבנה או לתכולה של הדירה?"
+    expect: "/claims-customer-service/claims-appartment-insurance/damage-to-the-apartment/"
+  - q: "נגרם נזק לצד שלישי מהדירה שלי, איך מגישים תביעה?"
+    expect: "/claims-customer-service/claims-appartment-insurance/claims-third-party-house/"
+  - q: "נשבר לי דוד השמש, מה עושים?"
+    expect: "/claims-customer-service/claims-appartment-insurance/water-heater/"
+  - q: "איך מגישים תביעה בביטוח מחלות קשות?"
+    expect:
+      - "/health-insurance/chronic-illness/faq/"
+      - "/claims-customer-service/claims-health-insurance/claims-serious-illness/"
+  - q: "איך פונים לשירות הלקוחות של הפניקס?"
+    expect: "/customer-service/"
+  - q: "מה כולל ביטוח תכולה לדירה?"
+    expect: "/apartment-insurance/apartment-contents-insurance/"
+  - q: "מה ההבדל בין ביטוח מקיף לביטוח חובה לרכב?"
+    expect: "/car-insurance/"
+  - q: "איך מגישים תביעת רכב?"
+    expect: "/claims-customer-service/claims-car-insurance/"
+  - q: "מה זה ביטוח חיים ריסק?"
+    expect: "/life-insurance/"
+  - q: "מה זה מוסך הסדר בביטוח רכב?"
+    expect: "/car-insurance/car_information/garages-car-insurance/"
+  - q: "איך מחדשים ביטוח רכב בקליק?"
+    expect: "/customer-service/car-insurance/car_renewal/"
+  - q: "אני בחו\"ל ורוצה להאריך ביטוח נסיעות, איך עושים את זה?"
+    expect: "/customer-service/travel-insurance/travel_policy_extension/"
+  - q: "איך מעדכנים פרטים אישיים כמו טלפון וכתובת?"
+    expect: "/customer-service/apartment-insurance/selfservice_personal_info_update/"
+  - q: "מה זה ביטוח מחלות קשות תוכנית מרפא?"
+    expect: "/health-insurance/chronic-illness/"
+  - q: "איך משנים מסלול השקעה בקופת גמל או בקרן השתלמות?"
+    expect: "/customer-service/common-actions/investment-track-change/"
+  - q: "מה זה גרירת משכנתא?"
+    expect: "/mortgage-insurance/mortgage-insurance-info/porting-a-mortgage/"
+  - q: "איך מגישים תביעה להחזר על תרופות שאינן בסל הבריאות?"
+    expect: "/claims-customer-service/claims-health-insurance/claims-medications-not-included/"
+  - q: "האם ביטוח תכולה מיועד גם לשוכרי דירה?"
+    expect: "/apartment-insurance/apartment-contents-insurance/"
+  - q: "איזה ביטוח יש להפניקס לרכב טסלה?"
+    expect: "/car-insurance/comprehensive/insure-my-tesla/"
+
+unanswerable:
+  - q: "מה מספר הטלפון הנייד האישי של ראש מחלקת תביעות דירה בהפניקס?"
+  - q: "מה דמי ההשתתפות העצמית הקבועים בביטוח דירה של הפניקס לכל המבוטחים בארץ?"
+  - q: "כמה עולה ביטוח מקיף לרכב מאזדה 3 שנת 2019 לנהג בן 35 מחולון?"
+  - q: "מה הייתה תשואת אתמול בשעה 17:00 של מסלול S&P500 בהפניקס, באחוזים עם שלוש ספרות אחרי הנקודה?"
+  - q: "האם מחר בחצות הפניקס מוכרת ביטוח דירה במחיר לילה מיוחד לסניף הרצל 17 בבאר שבע?"
+  - q: "מה מספר העובדים המדויק בהפניקס נכון להיום לפי האתר הציבורי?"
+  - q: "איזה אחוז הנחה מדויק מקבל כל מבוטח בחידוש ביטוח רכב בקליק?"
+  - q: "מה כתובת המייל האישית של מנכ\"ל הפניקס לפניות לקוחות?"
+  - q: "כמה תביעות נזקי מים אושרו בהפניקס בחודש שעבר, במספר מדויק?"
+  - q: "האם הפניקס מוכרת ביטוח לאופניים חשמליים במחיר אחיד של 17 שקל לכל הרוכבים בישראל?"

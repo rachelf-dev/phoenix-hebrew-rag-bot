@@ -1,0 +1,10 @@
+---
+description: Put a 1-2 line English note at the top of every source file so a reviewer can see what it does
+alwaysApply: true
+---
+
+# English file blurb (for the developer reviewing the code)
+
+When you **create or substantially edit** a source, config, or docs file, open it with a 1–2 line English comment (or a short markdown sentence under the title) that says what the file is and what it does. Keep that blurb updated if the file's role changes.
+
+This is for humans reading the repo — not for crawled site pages. Never add `english_summary` or similar fields under `data/`.

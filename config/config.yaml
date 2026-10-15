@@ -1,0 +1,109 @@
+# Central configuration for the Phoenix (fnx.co.il) Hebrew RAG chatbot.
+# Everything that the spec says must be configurable lives here
+# (seed URLs are in seeds.yaml, kept separate because the list is long).
+
+project:
+  name: phoenix-rag
+  data_dir: data            # raw HTML, sqlite store, cleaned pages, index
+  logs_dir: logs
+
+crawl:
+  base_url: https://www.fnx.co.il
+  allowed_hosts: [www.fnx.co.il, fnx.co.il]
+  sitemap_url: https://www.fnx.co.il/sitemap.xml
+  user_agent: "PhoenixRAGBot/0.1 (Open Code AI Hackathon 2026; educational RAG project; +https://github.com/)"
+  delay_seconds: 1.5        # polite: 1-2 s between requests
+  concurrency: 1            # polite: single worker
+  timeout_seconds: 30
+  max_retries: 3
+  respect_robots: true
+  discover_links: true      # also follow in-content links inside <main> (same domain, allowed prefixes)
+  max_pages: 0              # 0 = no limit (use --limit on the CLI for test runs)
+  drop_query_params: true   # fnx.co.il does not use query strings for content; robots.txt blocks ?page= ?tag= etc.
+  min_clean_chars: 200      # pages with less visible text are discarded, unless FAQ / form pages
+
+cleaning:
+  main_selector: "main#main"
+  # section-item blocks that are site chrome or lead-generation widgets, not informational content
+  drop_section_classes:
+    - contacts-section          # "כל הדרכים לדבר איתנו" repeated on every page
+    - lead-popup-form
+    - graphic-element
+    - locating-service-providers # service-provider locator widget (links only; we keep the links as metadata)
+    - sticky-nav
+    - search-form-element
+  drop_selectors:
+    - nav.breadcrumbs
+    - script
+    - style
+    - svg
+    - noscript
+    - iframe
+    - form
+    - "[aria-hidden='true']"
+  # repeated legal boilerplate paragraphs removed from body text (kept once as page metadata)
+  boilerplate_prefixes:
+    - "מידע זה הינו כללי אודות התכנית בלבד"
+    - "המידע לעיל אינו מהווה חוות דעת או המלצה"
+
+chunking:
+  target_tokens: 450
+  max_tokens: 600
+  overlap_tokens: 60
+  keep_faq_pairs_intact: true
+
+embedding:
+  # Primary: local multilingual-e5-base (CPU, no quota). Weights live in models/ (see scripts/fetch_hf_parallel.py).
+  # Alternative: provider: google + model: gemini-embedding-001 — free tier allows only ~1000 texts/day/model,
+  # so a full index (14k chunks) needs billing. Switching provider/model requires a full re-index.
+  provider: sentence-transformers
+  model: models/multilingual-e5-base        # 768-dim; query:/passage: prefixes are added automatically
+  task_document: RETRIEVAL_DOCUMENT         # (Gemini only)
+  task_query: RETRIEVAL_QUERY               # (Gemini only)
+  output_dimensionality: 768                # (Gemini only; MRL truncation, 3072 is native)
+  batch_size: 50
+  pause_seconds: 0
+  # Free tier is ~30K input tokens/minute. Token counts are cl100k (conservative for Hebrew vs Gemini's tokenizer).
+  tokens_per_minute: 36000                  # sliding-window budget in cl100k tokens (~25K Gemini tokens); 0 disables
+  max_batch_tokens: 12000                   # cap a single request so one batch never eats the whole minute
+  cache_path: data/embeddings_cache.sqlite  # resumable: already-embedded chunks are not re-sent
+
+
+vector_store:
+  provider: chroma
+  path: data/chroma
+  collection: fnx_pages
+
+retrieval:
+  top_k: 12
+  hybrid: true               # semantic + BM25, fused with RRF, then Cohere Rerank
+  relevance_threshold: 0.0   # to be CALIBRATED on the evaluation set (section 9), not guessed
+  rewrite_with_history: true
+  rerank:
+    provider: cohere         # hackathon toolkit: the Phoenix "secret weapon"
+    model: rerank-multilingual-v3.0
+    top_n: 6                 # chunks sent to Gemini after rerank, weak-hit drop, and action-page promote
+    max_candidates: 32       # hybrid hits sent to Cohere (action pages can sit ~rank 20)
+
+llm:
+  provider: google           # free AI Studio key; not OpenAI (no free API)
+  model: gemini-3.5-flash-lite   # new AI Studio keys: 2.5-flash retired, 3.5-flash often 429
+  fallback_model: gemini-3.5-flash
+  temperature: 0.1
+  max_output_tokens: 600
+  # Instruction at answer time: reply only from retrieved chunks, else the not_found message.
+
+evaluation:
+  # Toolkit success metric is "doesn't invent", not "sounds fluent".
+  grounded: 20               # questions whose answer is on fnx.co.il (must cite a real URL)
+  unanswerable: 10           # questions that must yield messages.not_found — no guessing
+  path: config/eval.yaml     # 20 grounded + 10 unanswerable (step 4)
+  pause_seconds: 8           # stay under Gemini free-tier RPM during a 30-item run
+
+messages:
+  not_found: "המידע הזה לא מופיע באתר הפניקס. לבירור נוסף מומלץ לפנות לשירות הלקוחות של הפניקס."
+  personal_boundary: "אני יכול להסביר מה הכיסוי כולל באופן כללי לפי האתר, אבל בדיקה של הפוליסה האישית שלך נעשית בשירות הלקוחות של הפניקס."
+  out_of_scope: "אני עונה רק על שאלות שקשורות לתוכן שמופיע באתר הפניקס (fnx.co.il)."
+  no_advice: "אני לא נותן ייעוץ אישי. אני יכול להסביר מה כתוב באתר על המוצר, אם תרצה."
+  no_account_access: "אין לי גישה למידע על התביעה או החשבון האישי שלך. לבדיקה אישית יש לפנות לשירות הלקוחות של הפניקס."
+  disclaimer: "הבוט עונה רק מתוך המידע הציבורי באתר הפניקס ואינו מחליף את תנאי הפוליסה או את שירות הלקוחות."

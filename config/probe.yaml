@@ -1,0 +1,23 @@
+# Small Hebrew retrieval smoke set (spec 6.4: verify the embedding model on Hebrew
+# before committing). A hit is counted if the expected URL substring appears in top-k.
+questions:
+  - q: "יש לי נזילה בבית, איך מגישים תביעה?"
+    expect: "/claims-customer-service/claims-appartment-insurance/pipeline-damage/"
+  - q: "איך מגישים תביעה על נזק למבנה או לתכולה של הדירה?"
+    expect: "/claims-customer-service/claims-appartment-insurance/damage-to-the-apartment/"
+  - q: "נגרם נזק לצד שלישי מהדירה שלי, איך מגישים תביעה?"
+    expect: "/claims-customer-service/claims-appartment-insurance/claims-third-party-house/"
+  - q: "נשבר לי דוד השמש, מה עושים?"
+    expect: "/claims-customer-service/claims-appartment-insurance/water-heater/"
+  - q: "איך מגישים תביעה בביטוח מחלות קשות?"
+    expect: "/health-insurance/chronic-illness/faq/"
+  - q: "איך פונים לשירות הלקוחות של הפניקס?"
+    expect: "/customer-service/"
+  - q: "מה כולל ביטוח תכולה לדירה?"
+    expect: "/apartment-insurance/apartment-contents-insurance/"
+  - q: "מה ההבדל בין ביטוח מקיף לביטוח חובה לרכב?"
+    expect: "/car-insurance/"
+  - q: "איך מגישים תביעת רכב?"
+    expect: "/claims-customer-service/claims-car-insurance/"
+  - q: "מה זה ביטוח חיים ריסק?"
+    expect: "/life-insurance/"

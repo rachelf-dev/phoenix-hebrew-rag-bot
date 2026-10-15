@@ -1,0 +1,162 @@
+# Step 1 deliverable: seed URLs + area map for the fnx.co.il crawl.
+# The crawler is sitemap-driven (https://www.fnx.co.il/sitemap.xml, ~1,650 URLs on 2026-10-11)
+# and keeps only URLs whose path starts with an *included* prefix and no *excluded* prefix.
+# Rationale for each area is in docs/site_map.md.
+
+# Ordered by priority. `section_type` is the default for the area; cleaning may refine it
+# (e.g. a page whose main block is a FAQ accordion becomes `faq`).
+include:
+  # --- Claims: the #1 customer intent ("how do I file a claim for X") ---
+  - prefix: /claims-customer-service/
+    section_type: claim
+    priority: 1
+    note: "Per-event claim pages (water damage, car accident, surgery...), claim settlement, pension benefits"
+
+  # --- Service & self-service actions (renew, cancel, policy copy, payments, contact) ---
+  - prefix: /customer-service/
+    section_type: service
+    priority: 1
+    note: "Common actions per product, contact channels, service charter, terms of use, privacy"
+
+  # --- Insurance products (what is covered, extensions, how to pay) ---
+  - prefix: /apartment-insurance/
+    section_type: product
+    priority: 1
+  - prefix: /car-insurance/
+    section_type: product
+    priority: 1
+  - prefix: /health-insurance/
+    section_type: product
+    priority: 1
+  - prefix: /travel-insurance/
+    section_type: product
+    priority: 1
+  - prefix: /life-insurance/
+    section_type: product
+    priority: 1
+  - prefix: /mortgage-insurance/
+    section_type: product
+    priority: 2
+  - prefix: /disability-and-incapacity-to-work/
+    section_type: product
+    priority: 2
+  - prefix: /pets-insurance/
+    section_type: product
+    priority: 2
+  - prefix: /business-insurance/
+    section_type: product
+    priority: 3
+  - prefix: /other-insurances/
+    section_type: product
+    priority: 3
+  - prefix: /truck-insurance/
+    section_type: product
+    priority: 3
+  - prefix: /marine_aviation_insurance/
+    section_type: product
+    priority: 3
+
+  # --- Pension, provident, savings (large customer base; many "how do I withdraw / deposit" questions) ---
+  - prefix: /pension-savings/
+    section_type: product
+    priority: 2
+  - prefix: /gemel/
+    section_type: product
+    priority: 2
+  - prefix: /ishtalmutfund/
+    section_type: product
+    priority: 2
+  - prefix: /savings/
+    section_type: product
+    priority: 2
+  - prefix: /pension_retirement/
+    section_type: product
+    priority: 2
+  - prefix: /takanottashlum/
+    section_type: terms
+    priority: 2
+    note: "Payment regulations (תקנות תשלומים) stages and forms"
+  - prefix: /loans/
+    section_type: product
+    priority: 3
+
+  # --- Service-provider locators (garages, plumbers, appraisers, doctors) + forms/policies ---
+  - prefix: /ituran/
+    section_type: service
+    priority: 2
+    note: "Despite the path name, this is the provider-locator & forms hub (שרברבים, מוסכים, שמאים, טפסים, פוליסות)"
+
+  # --- Calculators (text explanations only; the widgets themselves are JS) ---
+  - prefix: /calculators/
+    section_type: guide
+    priority: 3
+
+  - prefix: /articles/
+    section_type: guide
+    priority: 3
+
+  # --- Home page: only to seed link discovery ---
+  - prefix: /
+    exact: true
+    section_type: general
+    priority: 3
+
+exclude:
+  - prefix: /en/                      # English site; the bot answers in Hebrew from Hebrew content
+    reason: language
+  - prefix: /investor-relations/      # investor content, not customer-facing
+    reason: not customer-relevant
+  - prefix: /fnx-insurance-ltd/       # corporate governance, board, reports
+    reason: not customer-relevant
+  - prefix: /tags/                    # tag listing pages: duplicate content, no own information
+    reason: duplicate / listing
+  - prefix: /career/
+    reason: not customer-relevant
+  - prefix: /esop/
+    reason: employer product (ESOP), out of customer scope
+  - prefix: /alternativeinvestments/
+    reason: investment-house content, out of scope
+  - prefix: /haskaot-mitkadmot/
+    reason: investment-house content, out of scope
+  - prefix: /trading/
+    reason: investment-house content, out of scope
+  - prefix: /portfoliomanagement/
+    reason: investment-house content, out of scope
+  - prefix: /fnxw/
+    reason: wealth-management marketing
+  - prefix: /business-financing/
+    reason: B2B financing, out of scope
+  - prefix: /projectvalidation/
+    reason: B2B
+  - prefix: /guarantee-validation/
+    reason: B2B
+  - prefix: /ksmc-1/
+    reason: unknown marketing landing
+  - prefix: /agents-promotions/
+    reason: agent-facing
+  - prefix: /404/
+    reason: error page
+  - prefix: /sitemap/
+    reason: listing
+  - prefix: /more-information/
+    reason: robots.txt disallow
+  - prefix: /customer-service/terms-of-use/   # legal T&Cs for apps/sites; keep privacy policy & accessibility out of chat scope
+    reason: legal boilerplate; low value for customer questions (can be re-enabled)
+
+# Path fragments that refine section_type after the area default
+section_type_rules:
+  faq:
+    - "/faq/"
+    - "שאלות-ותשובות"
+  form:
+    - "/forms/"
+    - "tashlum-forms"
+  terms:
+    - "terms"
+    - "takanot"
+    - "/policies/"
+  guide:
+    - "-information/"
+    - "_information/"
+    - "-info/"
+    - "/articles/"
