@@ -138,6 +138,9 @@ def serve(cfg: Config, host: str = "127.0.0.1", port: int = 7860) -> None:
                 "answer": ans.text,
                 "citations": ans.citations,
                 "disclaimer": disclaimer,
+                "answer_type": ans.answer_type,
+                "sources": ans.citations,
+                "used_chunk_ids": ans.used_chunk_ids,
             }, ensure_ascii=False).encode("utf-8")
             self._send(200, body, "application/json; charset=utf-8")
 

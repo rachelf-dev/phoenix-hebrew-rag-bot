@@ -78,6 +78,7 @@ retrieval:
   top_k: 12
   hybrid: true               # semantic + BM25, fused with RRF, then Cohere Rerank
   relevance_threshold: 0.0   # to be CALIBRATED on the evaluation set (section 9), not guessed
+  max_per_url: 2             # URL dedupe in hybrid retrieval
   rewrite_with_history: true
   rerank:
     provider: cohere         # hackathon toolkit: the Phoenix "secret weapon"
@@ -89,7 +90,7 @@ llm:
   provider: google           # free AI Studio key; not OpenAI (no free API)
   model: gemini-3.5-flash-lite   # new AI Studio keys: 2.5-flash retired, 3.5-flash often 429
   fallback_model: gemini-3.5-flash
-  temperature: 0.1
+  temperature: 0
   max_output_tokens: 600
   # Instruction at answer time: reply only from retrieved chunks, else the not_found message.
 

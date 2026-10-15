@@ -49,9 +49,11 @@ def rrf_fuse(rank_lists: list[list[str]], k: int = 60) -> dict[str, float]:
 
 
 def search(index: VectorIndex, embedder: Embedder, question: str, *, top_k: int = 12,
-           hybrid: bool = True) -> list[Hit]:
+           hybrid: bool = True, threshold: float = 0.0, max_per_url: int = 2) -> list[Hit]:
+    """Hybrid search; `threshold` is an RRF floor (0.0 until Day-4 calibration)."""
     qvec = embedder.encode_queries([question])[0]
     pool = max(top_k * 2, 40)
+    max_per_url = max(1, int(max_per_url))
     sem = index.query(qvec, k=pool)
     sem_ids = sem["ids"][0] if sem["ids"] else []
     by_id: dict[str, tuple[str, dict]] = {}
@@ -83,7 +85,9 @@ def search(index: VectorIndex, embedder: Embedder, question: str, *, top_k: int 
         doc, meta = by_id[cid]
         url = meta.get("display_url", "") or meta.get("url", "")
         key = (url or "").rstrip("/")
-        if key and per_url.get(key, 0) >= 2:
+        if threshold > 0 and score < threshold:
+            continue
+        if key and per_url.get(key, 0) >= max_per_url:
             continue
         if key:
             per_url[key] = per_url.get(key, 0) + 1

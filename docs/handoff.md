@@ -2,7 +2,7 @@
 
 <!-- Hand-off note for the next chat session: what exists, what is blocked, and what to do next. Update when state changes. -->
 
-עודכן: 15/10/2026 14:20
+עודכן: 15/10/2026 18:25
 
 ## הפרויקט
 
@@ -47,10 +47,22 @@
 
 כוונון: `rerank.py` (דף-פעולה ל-Cohere, `drop_weak_hits`, promote לפי תביעה מול `/customer-service/` עמוק), `generate.py` (ייחוס דף פעולה + fallback אם Gemini מחזיר not_found/non-JSON), `pipeline.py`, `config.yaml` (`max_candidates: 32`, מודל `gemini-3.5-flash-lite` כי 2.5-flash פרש למפתחות חדשים). `GEMINI_API_KEY_1..15` נטענים. NetFree חוסם Vertex (`aiplatform.googleapis.com`) — רק AI Studio.
 
-## הצעד הבא (יום 3+)
+## יום 3 — אחזור + תשובה מובנית (end-to-end CLI)
 
-1. אופציונלי: `compare-embeddings` מול `gemini-embedding-001`.
-2. אריזה להגשה (README למשפטים, דמו קצר, רשימת מגבלות). הגמר 28/10.
+| שלב | מצב | היכן |
+|---|---|---|
+| סף + דה-דופ URL ב-`search` | ✅ | `retrieve.py` + `pipeline` מעביר מ-config |
+| JSON מובנה + `used_chunk_ids` | ✅ | `Answer.to_json()` |
+| ולידציית מקורות (אין מקור → not_found) | ✅ | `generate.py` |
+| לוג JSONL לכל שאילתה | ✅ | `logging_utils.py` → `logs/queries.jsonl` |
+| שכתוב follow-up + גבול אישי גם ב-not_found | ✅ | `pipeline.py` |
+| CLI `--json` + `scenarios` A/B/C | ✅ | `python -m phoenix_rag.cli scenarios` |
+
+## הצעד הבא (יום 4+)
+
+1. סט הערכה 25 שאלות + כיול סף (יום 4 בתכנון).
+2. אופציונלי: `compare-embeddings` מול `gemini-embedding-001`.
+3. אריזה להגשה. הגמר 28/10.
 
 ## פקודות שימושיות
 

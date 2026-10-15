@@ -7,9 +7,10 @@
     python -m phoenix_rag.cli index [--rechunk]               # embed + Chroma + BM25, then probe
     python -m phoenix_rag.cli probe [-k 12]                   # Hebrew retrieval smoke test
     python -m phoenix_rag.cli compare-embeddings [--models ...]   # embedding bake-off on a Hebrew subset
-    python -m phoenix_rag.cli ask "שאלה"                       # one grounded answer (rerank + Gemini)
+    python -m phoenix_rag.cli ask "שאלה" [--json]              # one grounded answer (rerank + Gemini)
     python -m phoenix_rag.cli chat                             # interactive Hebrew chat
     python -m phoenix_rag.cli eval                             # 20 grounded + 10 unanswerable
+    python -m phoenix_rag.cli scenarios                        # Day-3 A/B/C
     python -m phoenix_rag.cli serve [--port 7860]              # local chat UI
     python -m phoenix_rag.cli status               # store counts and last runs
 """
@@ -354,7 +355,10 @@ def cmd_ask(cfg: Config, args: argparse.Namespace) -> int:
     pipe = Pipeline(cfg)
     question = " ".join(args.question).strip()
     ans = pipe.ask(question, rerank=not args.no_rerank)
-    print("\n" + format_cli(ans, cfg))
+    if args.json:
+        print(json.dumps(ans.to_json(), ensure_ascii=False, indent=2))
+    else:
+        print("\n" + format_cli(ans, cfg))
     return 0
 
 
@@ -378,6 +382,14 @@ def cmd_chat(cfg: Config, args: argparse.Namespace) -> int:
         print(format_cli(ans, cfg))
         history.append({"role": "user", "content": question})
         history.append({"role": "assistant", "content": ans.text})
+
+
+def cmd_scenarios(cfg: Config, args: argparse.Namespace) -> int:
+    from .answering.scenarios import run_scenarios
+
+    _setup_logging(cfg, "scenarios")
+    rows = run_scenarios(cfg, rerank=not args.no_rerank)
+    return 0 if all(r.ok for r in rows) else 1
 
 
 def cmd_eval(cfg: Config, args: argparse.Namespace) -> int:
@@ -480,12 +492,17 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("ask", help="answer one Hebrew question from the site index")
     p.add_argument("question", nargs="+")
+    p.add_argument("--json", action="store_true", help="print spec JSON (answer_type, sources, used_chunk_ids)")
     p.add_argument("--no-rerank", action="store_true", help="skip Cohere Rerank")
     p.set_defaults(func=cmd_ask)
 
     p = sub.add_parser("chat", help="interactive Hebrew chat over the site index")
     p.add_argument("--no-rerank", action="store_true")
     p.set_defaults(func=cmd_chat)
+
+    p = sub.add_parser("scenarios", help="run Day-3 reference scenarios A/B/C")
+    p.add_argument("--no-rerank", action="store_true")
+    p.set_defaults(func=cmd_scenarios)
 
     p = sub.add_parser("eval", help="run config/eval.yaml (grounded + unanswerable)")
     p.add_argument("--limit", type=int, default=0, help="only the first N items (smoke)")
