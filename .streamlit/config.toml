@@ -1,0 +1,7 @@
+# Streamlit server defaults for Phoenix RAG (no usage-stats prompt in the browser).
+
+[browser]
+gatherUsageStats = false
+
+[server]
+headless = false

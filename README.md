@@ -15,7 +15,7 @@ README בעברית; קוד והערות קוד באנגלית. רישיון: MI
 | 3. שכבת תשובה | **הושלם**: היברידי → Cohere Rerank → Gemini Flash, ציטוט URL, `not_found` |
 | 4. סט הערכה (20 עם תשובה באתר + 10 בלי) | **הושלם**: `config/eval.yaml` |
 | 5. טיפול בגבולות | **הושלם**: מידע אישי / ייעוץ / חשבון / מחוץ לתחום |
-| 6. ממשק צ'אט ואריזה | **הושלם**: `ask` / `chat` ב-CLI + UI מקומי ב-`serve` |
+| 6. ממשק צ'אט ואריזה | **הושלם**: Streamlit RTL (`run`) + CLI + `docs/SUMMARY.md` |
 
 ## התקנה
 
@@ -64,7 +64,8 @@ python -m phoenix_rag.cli compare-embeddings [--models a b]    # השוואת מ
 python -m phoenix_rag.cli ask "יש לי נזילה בבית, איך מגישים תביעה?"
 python -m phoenix_rag.cli chat
 python -m phoenix_rag.cli eval [--limit N] [--no-rerank]
-python -m phoenix_rag.cli serve [--port 7860]   # צ'אט בדפדפן, http://127.0.0.1:7860/
+python -m phoenix_rag.cli run [--port 8501]     # UI מלא לפי עיצוב.txt (FastAPI)
+python -m phoenix_rag.cli serve [--port 7860]   # UI קל (stdlib), http://127.0.0.1:7860/
 
 # מצב המאגר וריצות אחרונות
 python -m phoenix_rag.cli status
@@ -132,7 +133,8 @@ python -m phoenix_rag.cli status
 * **LLM**: **Gemini 2.5 Flash** (מפתח חינמי מ-AI Studio, `GEMINI_API_KEY`; נפילה ל-`gemini-3.8-flash` ואז `gemini-2.5-flash-lite`). אפשר להוסיף `GEMINI_API_KEY_2` / `_3` — ב-429 הקוד עובר למפתח הבא. ההוראה הקבועה: לענות רק מהקטעים שאוחזרו; אחרת הודעת `not_found`. ציון `URL` בכל תשובה. לא OpenAI — אין API חינמי.
 * **גבולות**: שאלת חשבון/תביעה אישית → `no_account_access`; "הפוליסה שלי" / ייעוץ אישי → תשובה כללית מהאתר + הודעת גבול; נושא לא קשור לאתר → `out_of_scope`.
 * **סט הערכה**: מדד ההצלחה הוא "לא ממציא". **20 שאלות** עם תשובה באתר (חייבות מקור אמיתי) ו-**10 שאלות** בלי תשובה באתר — `config/eval.yaml`. הרצה: `python -m phoenix_rag.cli eval`.
-* **ממשק**: `ask` / `chat` בטרמינל, ו-`serve` לדפדפן (בלי Gradio, רק הספרייה הסטנדרטית).
+* **ממשק**: `run` — FastAPI + `app/static/index.html` (עיצוב מלא מ-`עיצוב.txt`, Tailwind/Lucide); `serve` — UI קל; `ask` / `chat` בטרמינל.
+* **סיכום והדגמה**: `docs/SUMMARY.md`, `docs/demo_script.md`, `docs/eval_before_after.md`.
 
 ## הערות תפעול
 
@@ -150,8 +152,12 @@ config/eval.yaml        סט הערכה: 20 שאלות עם תשובה באתר 
 config/seeds.yaml       אזורים נכללים/מוחרגים + section_type
 config/probe.yaml       10 שאלות smoke לאחזור (עמוד צפוי לכל שאלה)
 docs/site_map.md        מפת האתר ונימוקים (שלב 1)
+docs/SUMMARY.md         סיכום טכני, הערכה, מגבלות (יום 5)
+docs/demo_script.md     תסריט הדגמה לגמר
 docs/handoff.md         מצב הפרויקט ומסמך מעבר בין סשנים
-phoenix_rag/cli.py      map | crawl | clean | chunk | index | probe | compare-embeddings | ask | chat | eval | serve | inspect | status
+app/static/index.html   UI מלא (מקור: עיצוב.txt)
+app/web.py              FastAPI + /api/ask
+phoenix_rag/cli.py      map | crawl | clean | chunk | index | probe | compare-embeddings | ask | chat | eval | run | serve | inspect | status
 phoenix_rag/crawler/    urls.py (נרמול+סיווג), robots.py, store.py (SQLite), crawl.py
 phoenix_rag/cleaning/   hebrew.py (נרמול טקסט), clean.py (HTML -> בלוקים)
 phoenix_rag/indexing/   chunk.py, embed.py (e5 מקומי + Gemini עם קצב), embed_cache.py, store.py, retrieve.py, compare.py

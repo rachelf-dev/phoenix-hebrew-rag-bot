@@ -2,7 +2,7 @@
 
 <!-- Hand-off note for the next chat session: what exists, what is blocked, and what to do next. Update when state changes. -->
 
-עודכן: 15/10/2026 19:25
+עודכן: 18/10/2026
 
 ## הפרויקט
 
@@ -35,18 +35,6 @@
 | גבולות (אישי / ייעוץ / חשבון / מחוץ לתחום) | ✅ | `answering/boundaries.py` |
 | ממשק צ'אט | ✅ CLI `ask`/`chat` + UI `serve` | http://127.0.0.1:7860/ |
 
-לוג: `logs/eval_20261015T111048Z.log`. בלי אינדוקס מחדש.
-
-שלושת כשלונות הציטוט מ-17/20 תוקנו (דף פעולה במקום FAQ / NONE / how-to-join):
-
-| שאלה | ציטוט אחרי התיקון |
-|---|---|
-| הארכת ביטוח נסיעות מחו"ל | `/customer-service/travel-insurance/travel_policy_extension/` |
-| עדכון פרטים אישיים | `/customer-service/apartment-insurance/selfservice_personal_info_update/` |
-| שינוי מסלול השקעה בגמל/השתלמות | `/customer-service/common-actions/investment-track-change/` |
-
-כוונון: `rerank.py` (דף-פעולה ל-Cohere, `drop_weak_hits`, promote לפי תביעה מול `/customer-service/` עמוק), `generate.py` (ייחוס דף פעולה + fallback אם Gemini מחזיר not_found/non-JSON), `pipeline.py`, `config.yaml` (`max_candidates: 32`, מודל `gemini-3.5-flash-lite` כי 2.5-flash פרש למפתחות חדשים). `GEMINI_API_KEY_1..15` נטענים. NetFree חוסם Vertex (`aiplatform.googleapis.com`) — רק AI Studio.
-
 ## יום 3 — אחזור + תשובה מובנית (end-to-end CLI)
 
 | שלב | מצב | היכן |
@@ -68,15 +56,22 @@
 | ריצה מלאה `after_tuned` | ✅ **30/30**, hallucination 0 | `eval/results/20261015T180807Z_after_tuned.json` |
 | כוונון | ✅ EN on-topic, how-to EN, demote business/דירה, c01 wording | `boundaries.py`, `rerank.py`, `generate.py` |
 
-```powershell
-python scripts/eval.py --tag after_tuned
-python -m phoenix_rag.cli eval
-```
+## יום 5 — ממשק Streamlit, אריזה, סיכום
 
-## הצעד הבא (יום 5+)
+| שלב | מצב | היכן |
+|---|---|---|
+| UI מלא `עיצוב.txt` + FastAPI | ✅ | `app/static/index.html`, `app/static/phoenix_chat.js`, `app/web.py` |
+| `python -m phoenix_rag.cli run` | ✅ | port 8501 (uvicorn) |
+| `docs/SUMMARY.md` | ✅ | before/after, ארכיטקטורה, DoD |
+| `docs/demo_script.md` | ✅ | תסריט הדגמה + holdout |
+| `streamlit` ב-requirements | ✅ | `requirements.txt` |
 
-1. הרצת סט מלא + טבלת before/after ב-`docs/SUMMARY.md` אחרי `--tag after`.
-2. Streamlit RTL + אריזה להגשה. הגמר 28/10.
+### לפני הגמר (28/10)
+
+1. הרצת eval מלאה אחרי שינוי אחרון (אם יש): `python scripts/eval.py --tag after_tuned`
+2. בדיקת clean checkout לפי DoD ב-`docs/SUMMARY.md`
+3. חזרה על `docs/demo_script.md` מול `run`
+4. **Feature freeze** — רק תיקוני באגים / feedback שופטים
 
 ## פקודות שימושיות
 
@@ -85,6 +80,8 @@ python -m phoenix_rag.cli status
 python -m phoenix_rag.cli ask "יש לי נזילה בבית, איך מגישים תביעה?"
 python -m phoenix_rag.cli chat
 python -m phoenix_rag.cli eval [--limit N] [--no-rerank]
+python -m phoenix_rag.cli run [--port 8501]
 python -m phoenix_rag.cli serve [--port 7860]
+python -m phoenix_rag.cli scenarios
 python -m phoenix_rag.cli probe [-k 12] [--no-hybrid]
 ```

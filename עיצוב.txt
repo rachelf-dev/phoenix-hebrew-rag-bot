@@ -1,0 +1,742 @@
+<!DOCTYPE html><html dir="rtl" lang="he"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>הפניקס - ביטוח, השקעות ואשראי | צ'אטבוט Phoenix RAG</title>
+<!-- Tailwind CSS CDN with forms & container queries -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<!-- Google Fonts: Assistant & Rubik -->
+<link href="https://fonts.googleapis.com" rel="preconnect">
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect">
+<link href="https://fonts.googleapis.com/css2?family=Assistant:wght@300;400;500;600;700;800&amp;family=Rubik:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
+<!-- Lucide Icons -->
+<script src="https://unpkg.com/lucide@latest"></script>
+<script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Assistant', 'sans-serif'],
+            rubik: ['Rubik', 'sans-serif'],
+          },
+          colors: {
+            fnx: {
+              navy: '#0b162c',
+              'navy-header': '#0c172d',
+              'navy-card': '#132342',
+              'navy-border': '#1d325c',
+              orange: '#ff551f',
+              'orange-hover': '#e6440f',
+              'orange-light': '#fff3ed',
+              'orange-soft': '#ff6e3d',
+            }
+          },
+          boxShadow: {
+            'floating': '0 24px 50px -12px rgba(11, 22, 44, 0.45), 0 0 25px rgba(255, 85, 31, 0.2)',
+            'bubble': '0 4px 14px rgba(0, 0, 0, 0.06)',
+            'orange-glow': '0 10px 25px -5px rgba(255, 85, 31, 0.5)',
+          }
+        }
+      }
+    }
+  </script>
+<style>
+    body {
+      font-family: 'Assistant', sans-serif;
+    }
+    .custom-scroll::-webkit-scrollbar {
+      width: 5px;
+    }
+    .custom-scroll::-webkit-scrollbar-track {
+      background: #F1F5F9;
+      border-radius: 9999px;
+    }
+    .custom-scroll::-webkit-scrollbar-thumb {
+      background: #CBD5E1;
+      border-radius: 9999px;
+    }
+    .custom-scroll::-webkit-scrollbar-thumb:hover {
+      background: #94A3B8;
+    }
+    .cursor-blink::after {
+      content: '|';
+      display: inline-block;
+      margin-right: 2px;
+      color: #ff551f;
+      animation: blink 0.9s infinite;
+      font-weight: bold;
+    }
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0; }
+    }
+    @keyframes pulse-ring {
+      0% { transform: scale(0.96); box-shadow: 0 0 0 0 rgba(255, 85, 31, 0.65); }
+      70% { transform: scale(1); box-shadow: 0 0 0 16px rgba(255, 85, 31, 0); }
+      100% { transform: scale(0.96); box-shadow: 0 0 0 0 rgba(255, 85, 31, 0); }
+    }
+    .pulse-animation {
+      animation: pulse-ring 2.6s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 antialiased min-h-screen relative overflow-x-hidden">
+<!-- ==================== HEADER (AUTHENTIC PHOENIX STYLE FROM IMAGE 2) ==================== -->
+<header class="bg-[#0c172d] text-white border-b border-[#18284b] sticky top-0 z-30 shadow-md">
+<!-- Top Micro Sub-bar -->
+<div class="border-b border-white/10 hidden md:block">
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-8 flex items-center justify-between text-xs text-slate-300">
+<div class="flex items-center gap-6">
+<a class="hover:text-white transition-colors" href="#">קריירה</a>
+<a class="hover:text-white transition-colors" href="#">פורטל סוכנים</a>
+<a class="hover:text-white transition-colors" href="#">פורטל מעסיקים</a>
+<a class="hover:text-white transition-colors" href="#">הפניקס בית השקעות</a>
+<a class="hover:text-white transition-colors" href="#">הפניקס smart</a>
+<a class="hover:text-white transition-colors" href="#">קשרי משקיעים</a>
+<a class="text-slate-400 hover:text-white font-sans transition-colors" href="#">Investor Relations</a>
+</div>
+<div class="flex items-center gap-4 text-xs">
+<span class="text-slate-300 flex items-center gap-1.5">
+<i class="w-3.5 h-3.5 text-[#ff551f]" data-lucide="phone"></i>
+            מוקד טלפוני: 5040*
+          </span>
+<span class="text-white/30">|</span>
+<span class="text-[#ff551f] font-semibold">עברית</span>
+</div>
+</div>
+</div>
+<!-- Main Navigation Bar -->
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
+<!-- Logo + Main Nav Links (RTL layout) -->
+<div class="flex items-center gap-8 lg:gap-10">
+<!-- Authentic Phoenix Brand Logo -->
+<a class="flex items-center gap-2.5 group" href="#">
+<div class="relative flex items-center">
+<!-- Phoenix Arc Symbol in Vibrant Orange -->
+<svg class="w-8 h-8 text-[#ff551f]" fill="none" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
+<path d="M12 28C10 24 9 19 13 13C16 9 22 7 28 8C20 9 16 13 16 17C16 22 23 23 27 24C32 25 35 28 34 32C30 31 27 28 23 28C19 28 15 29 12 28Z" fill="url(#fnx-flame)"></path>
+<path d="M28 7C32 10 36 15 35 22C34 17 31 13 27 10C24 8 20 8 16 8C21 6 25 6 28 7Z" fill="#ff7a3d" opacity="0.8"></path>
+<defs>
+<linearGradient gradientUnits="userSpaceOnUse" id="fnx-flame" x1="10" x2="35" y1="8" y2="32">
+<stop stop-color="#ff7b39"></stop>
+<stop offset="0.6" stop-color="#ff551f"></stop>
+<stop offset="1" stop-color="#e13b06"></stop>
+</linearGradient>
+</defs>
+</svg>
+<span class="text-3xl font-extrabold tracking-tight text-white font-rubik mr-1">הפניקס</span>
+</div>
+</a>
+<!-- Desktop Navigation Items -->
+<nav class="hidden lg:flex items-center gap-6 xl:gap-8 font-semibold text-sm xl:text-base text-white/95">
+<a class="hover:text-[#ff551f] transition-colors py-2 border-b-2 border-transparent hover:border-[#ff551f]" href="#">ביטוחים</a>
+<a class="hover:text-[#ff551f] transition-colors py-2 border-b-2 border-transparent hover:border-[#ff551f]" href="#">פנסיה, גמל וחסכון</a>
+<a class="hover:text-[#ff551f] transition-colors py-2 border-b-2 border-transparent hover:border-[#ff551f]" href="#">השקעות</a>
+<a class="hover:text-[#ff551f] transition-colors py-2 border-b-2 border-transparent hover:border-[#ff551f]" href="#">אשראי</a>
+<a class="hover:text-[#ff551f] transition-colors py-2 border-b-2 border-transparent hover:border-[#ff551f]" href="#">תביעות</a>
+<a class="hover:text-[#ff551f] transition-colors py-2 border-b-2 border-transparent hover:border-[#ff551f]" href="#">שירות ופעולות</a>
+</nav>
+</div>
+<!-- Left CTA Buttons & Mobile Hamburger -->
+<div class="flex items-center gap-3">
+<!-- Subtle Pill "לאזור האישי" as in Image 2 -->
+<a class="hidden sm:inline-flex items-center gap-2 px-6 py-2.5 rounded-full border border-white/40 hover:border-white text-white font-semibold text-sm bg-transparent hover:bg-white/10 transition-all duration-200" href="#">
+          לאזור האישי
+        </a>
+<!-- Mobile hamburger -->
+<button aria-label="פתח תפריט" class="lg:hidden p-2 rounded-lg text-white hover:bg-white/10" id="mobile-menu-btn">
+<i class="w-6 h-6" data-lucide="menu"></i>
+</button>
+</div>
+</div>
+<!-- Mobile Drawer Navigation -->
+<div class="hidden lg:hidden bg-[#0c172d] border-t border-[#18284b] px-4 py-4 space-y-2 text-sm font-semibold" id="mobile-menu">
+<a class="block py-2 text-white hover:text-[#ff551f]" href="#">ביטוחים</a>
+<a class="block py-2 text-white hover:text-[#ff551f]" href="#">פנסיה, גמל וחסכון</a>
+<a class="block py-2 text-white hover:text-[#ff551f]" href="#">השקעות</a>
+<a class="block py-2 text-white hover:text-[#ff551f]" href="#">אשראי</a>
+<a class="block py-2 text-white hover:text-[#ff551f]" href="#">תביעות ושירות</a>
+<a class="block py-2.5 text-center rounded-full border border-white/40 text-white mt-3" href="#">כניסה לאזור האישי</a>
+</div>
+</header>
+<!-- ==================== HERO SECTION (IMAGE 2 AUTHENTIC HERO) ==================== -->
+<section class="bg-gradient-to-b from-[#0c172d] via-[#0f1d38] to-[#0c172d] text-white relative overflow-hidden pt-8 pb-20 lg:pt-14 lg:pb-28">
+<!-- Geometric Angled Accents / Graphic Polygons inspired by Image 2 -->
+<div class="absolute inset-0 pointer-events-none overflow-hidden">
+<!-- Angled Orange Outline Polygon -->
+<svg class="absolute -right-20 top-4 w-[650px] h-[650px] opacity-25 lg:opacity-35" fill="none" viewBox="0 0 600 600">
+<polygon points="120,40 560,90 480,540 60,490" stroke="#ff551f" stroke-dasharray="14 10" stroke-width="3"></polygon>
+</svg>
+<!-- Deep Blue Polygon Background Mask -->
+<div class="absolute -left-20 -bottom-20 w-[450px] h-[450px] rounded-full bg-[#ff551f]/10 blur-3xl"></div>
+<div class="absolute right-1/4 top-10 w-[500px] h-[500px] rounded-full bg-blue-600/10 blur-3xl"></div>
+</div>
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
+<div class="grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-8 items-center">
+<!-- Right Column (In RTL): Main Hero Typography + CTA (Cols 7 on Desktop) -->
+<div class="lg:col-span-7 text-right space-y-6">
+<div class="inline-flex items-center gap-2 bg-white/10 backdrop-blur-md px-3.5 py-1.5 rounded-full text-xs font-semibold text-orange-200 border border-white/15">
+<span class="w-2 h-2 rounded-full bg-[#ff551f] animate-ping"></span>
+            האפליקציה החדשה של הפניקס לשליטה מלאה
+          </div>
+<h1 class="text-4xl sm:text-5xl lg:text-[3.5rem] font-extrabold text-white leading-[1.18] font-rubik tracking-tight">
+            אפליקציית הפניקס <br>
+<span class="text-transparent bg-clip-text bg-gradient-to-l from-white via-slate-100 to-slate-300">
+              כי מגיע לכם להיות בשליטה
+            </span>
+</h1>
+<p class="text-slate-300 text-lg sm:text-2xl font-light leading-relaxed max-w-xl">
+            בענייני הביטוח, ההשקעות והאשראי שלכם
+          </p>
+<div class="pt-2 flex flex-wrap items-center gap-4">
+<!-- Authentic Phoenix Orange Pill CTA button -->
+<a class="inline-flex items-center justify-center px-10 py-4 rounded-full bg-[#ff551f] hover:bg-[#e6440f] text-white font-bold text-lg shadow-orange-glow transition-all transform hover:-translate-y-0.5 active:translate-y-0" href="#download">
+              להורדת האפליקציה
+            </a>
+<button class="inline-flex items-center gap-2 px-6 py-4 rounded-full bg-white/10 hover:bg-white/15 text-white font-semibold text-base border border-white/20 transition-all" onclick="toggleChatWindow()">
+<i class="w-5 h-5 text-[#ff551f]" data-lucide="sparkles"></i>
+              שאלות? שאל את ה-AI
+            </button>
+</div>
+<!-- Feature Bullets -->
+<div class="pt-6 grid grid-cols-2 sm:grid-cols-3 gap-4 border-t border-white/10 text-xs text-slate-300">
+<div class="flex items-center gap-2">
+<i class="w-4 h-4 text-[#ff551f]" data-lucide="check"></i>
+<span>הגשת תביעה ב-3 דקות</span>
+</div>
+<div class="flex items-center gap-2">
+<i class="w-4 h-4 text-[#ff551f]" data-lucide="check"></i>
+<span>צפייה בתיק הפנסיוני</span>
+</div>
+<div class="flex items-center gap-2">
+<i class="w-4 h-4 text-[#ff551f]" data-lucide="check"></i>
+<span>הזמנת שירותי דרך מהירה</span>
+</div>
+</div>
+</div>
+<!-- Left Column: App Showcase + QR Code Frame (Cols 5 on Desktop) -->
+<div class="lg:col-span-5 flex items-center justify-center lg:justify-end relative">
+<!-- Outer Decorative Angled Frame from Image 2 -->
+<div class="relative w-full max-w-md sm:max-w-lg lg:max-w-none flex items-center justify-center gap-4">
+<!-- QR Card (Image 2 style) -->
+<div class="hidden sm:flex flex-col items-center bg-[#0d1b33]/90 backdrop-blur-md p-4 rounded-2xl border-2 border-[#ff551f]/80 shadow-2xl shrink-0 -ml-4 z-20">
+<!-- QR Code Mockup Graphic -->
+<div class="w-28 h-28 bg-white p-2 rounded-xl flex items-center justify-center shadow-inner">
+<svg class="w-full h-full text-slate-900" fill="currentColor" viewBox="0 0 100 100">
+<path d="M0,0 h30 v30 h-30 z M10,10 h10 v10 h-10 z M70,0 h30 v30 h-30 z M80,10 h10 v10 h-10 z M0,70 h30 v30 h-30 z M10,80 h10 v10 h-10 z M40,10 h20 v10 h-20 z M40,30 h10 v10 h-10 z M60,40 h10 v10 h-10 z M10,40 h20 v10 h-20 z M40,60 h10 v30 h-10 z M60,70 h30 v10 h-30 z M70,90 h20 v10 h-20 z M80,40 h10 v20 h-10 z"></path>
+</svg>
+</div>
+<span class="text-white text-base font-bold mt-3 font-rubik tracking-wide">להורדה סרקו</span>
+</div>
+<!-- Smartphone Frame Representation (Authentic Screen Graphic from Image 2) -->
+<div class="relative w-[280px] sm:w-[310px] h-[520px] bg-slate-950 rounded-[42px] p-3 shadow-2xl border-4 border-slate-700/80 ring-1 ring-white/20 z-10 overflow-hidden">
+<!-- Camera Notch & Speaker -->
+<div class="absolute top-0 left-1/2 -translate-x-1/2 w-32 h-6 bg-slate-900 rounded-b-2xl flex items-center justify-center z-30">
+<span class="w-12 h-1 bg-slate-700 rounded-full"></span>
+</div>
+<!-- Phone Screen Content (Faithful to Image 2 design) -->
+<div class="w-full h-full bg-[#f4f6fa] rounded-[32px] overflow-hidden flex flex-col text-slate-800 text-right font-sans relative">
+<!-- Status bar -->
+<div class="pt-7 px-4 pb-2 flex items-center justify-between text-[11px] font-semibold text-slate-600">
+<span>08:34</span>
+<div class="flex items-center gap-1.5 text-slate-700">
+<span class="text-[9px]">4G</span>
+<i class="w-3 h-3" data-lucide="wifi"></i>
+<i class="w-3.5 h-3.5" data-lucide="battery"></i>
+</div>
+</div>
+<!-- Top App Bar -->
+<div class="px-4 py-2 flex items-center justify-between border-b border-slate-100">
+<div class="w-6 h-6 rounded-full bg-slate-100 flex items-center justify-center">
+<i class="w-3.5 h-3.5 text-slate-600" data-lucide="bell"></i>
+</div>
+<span class="text-xs font-bold text-slate-800">הבקשות שלי •</span>
+<div class="text-[#ff551f] font-rubik font-bold text-xs">הפניקס</div>
+</div>
+<!-- Three Spherical Action Bubbles like in Image 2 -->
+<div class="p-3 relative flex-1 flex flex-col justify-center items-center gap-2">
+<!-- Bubble 1: Investments -->
+<div class="w-28 h-28 rounded-full bg-gradient-to-tr from-[#1b2559] to-[#344697] text-white p-2.5 flex flex-col items-center justify-center shadow-lg relative transform -translate-y-2">
+<div class="text-[10px] text-blue-200">השקעות</div>
+<div class="text-[8px] opacity-75">2 מוצרים</div>
+<i class="w-5 h-5 text-amber-400 mt-1" data-lucide="trending-up"></i>
+</div>
+<div class="w-full flex justify-between items-center px-1 -mt-4">
+<!-- Bubble 2: Insurance -->
+<div class="w-24 h-24 rounded-full bg-gradient-to-tr from-[#0a1b42] to-[#1e3b8a] text-white p-2 flex flex-col items-center justify-center shadow-md">
+<div class="text-[10px] font-bold">ביטוח</div>
+<div class="text-[8px] opacity-75">מוצר אחד</div>
+<i class="w-4 h-4 text-cyan-400 mt-0.5" data-lucide="shield"></i>
+</div>
+<!-- Bubble 3: Credit & Loans -->
+<div class="w-24 h-24 rounded-full bg-gradient-to-tr from-[#131b3e] to-[#2e1d52] text-white p-2 flex flex-col items-center justify-center shadow-md">
+<div class="text-[10px] font-bold">אשראי</div>
+<div class="text-[8px] opacity-75">והלוואות</div>
+<i class="w-4 h-4 text-emerald-400 mt-0.5" data-lucide="wallet"></i>
+</div>
+</div>
+<div class="mt-3 text-center">
+<span class="text-[10px] font-bold text-slate-500">פעולות במיוחד בשבילך</span>
+<div class="flex items-center justify-center gap-2 mt-2">
+<span class="w-7 h-7 rounded-lg bg-orange-100 text-[#ff551f] flex items-center justify-center"><i class="w-3.5 h-3.5" data-lucide="file-text"></i></span>
+<span class="w-7 h-7 rounded-lg bg-blue-100 text-blue-600 flex items-center justify-center"><i class="w-3.5 h-3.5" data-lucide="pie-chart"></i></span>
+<span class="w-7 h-7 rounded-lg bg-emerald-100 text-emerald-600 flex items-center justify-center"><i class="w-3.5 h-3.5" data-lucide="plus-circle"></i></span>
+</div>
+</div>
+</div>
+<!-- Bottom Navigation of Mobile Screen -->
+<div class="bg-white border-t border-slate-200 py-2 px-6 flex justify-between items-center text-[9px] text-slate-400">
+<div class="text-[#ff551f] flex flex-col items-center"><i class="w-3.5 h-3.5" data-lucide="home"></i><span>ראשי</span></div>
+<div class="flex flex-col items-center"><i class="w-3.5 h-3.5" data-lucide="file-check"></i><span>פוליסות</span></div>
+<div class="flex flex-col items-center"><i class="w-3.5 h-3.5" data-lucide="user"></i><span>פרופיל</span></div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Slider Indicators as seen at bottom of Image 2 (< II o o o o >) -->
+<div class="mt-10 pt-6 flex items-center justify-center gap-3 text-white/50 text-xs">
+<button aria-label="הקודם" class="hover:text-white transition-colors"><i class="w-4 h-4" data-lucide="chevron-right"></i></button>
+<button class="hover:text-white transition-colors"><i class="w-3 h-3" data-lucide="pause"></i></button>
+<span class="w-2.5 h-2.5 rounded-full bg-white"></span>
+<span class="w-2 h-2 rounded-full bg-white/40 hover:bg-white/80 cursor-pointer"></span>
+<span class="w-2 h-2 rounded-full bg-white/40 hover:bg-white/80 cursor-pointer"></span>
+<span class="w-2 h-2 rounded-full bg-white/40 hover:bg-white/80 cursor-pointer"></span>
+<span class="w-2 h-2 rounded-full bg-white/40 hover:bg-white/80 cursor-pointer"></span>
+<button aria-label="הבא" class="hover:text-white transition-colors"><i class="w-4 h-4" data-lucide="chevron-left"></i></button>
+</div>
+</div>
+</section>
+<!-- ==================== QUICK SERVICES TILES SECTION ==================== -->
+<section class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 -mt-8 sm:-mt-10 relative z-20 pb-16">
+<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
+<!-- Card 1 -->
+<div class="bg-white rounded-2xl p-6 shadow-lg border border-slate-100 hover:border-[#ff551f] transition-all duration-300 hover:-translate-y-1 group">
+<div class="w-12 h-12 rounded-2xl bg-orange-50 text-[#ff551f] flex items-center justify-center mb-4 group-hover:bg-[#ff551f] group-hover:text-white transition-all shadow-sm">
+<i class="w-6 h-6" data-lucide="car"></i>
+</div>
+<h3 class="font-bold text-slate-900 text-lg mb-1.5 font-rubik">ביטוח רכב smart</h3>
+<p class="text-slate-500 text-xs leading-relaxed">פוליסה דיגיטלית מותאמת אישית, שירותי דרך מהירים וגרירה בלחיצת כפתור.</p>
+</div>
+<!-- Card 2 -->
+<div class="bg-white rounded-2xl p-6 shadow-lg border border-slate-100 hover:border-[#ff551f] transition-all duration-300 hover:-translate-y-1 group">
+<div class="w-12 h-12 rounded-2xl bg-orange-50 text-[#ff551f] flex items-center justify-center mb-4 group-hover:bg-[#ff551f] group-hover:text-white transition-all shadow-sm">
+<i class="w-6 h-6" data-lucide="home"></i>
+</div>
+<h3 class="font-bold text-slate-900 text-lg mb-1.5 font-rubik">ביטוח דירה ומבנה</h3>
+<p class="text-slate-500 text-xs leading-relaxed">תביעות נזקי צנרת ומים בדיגיטל (homeclaim), שרברב שבהסדר וליווי מקצועי.</p>
+</div>
+<!-- Card 3 -->
+<div class="bg-white rounded-2xl p-6 shadow-lg border border-slate-100 hover:border-[#ff551f] transition-all duration-300 hover:-translate-y-1 group">
+<div class="w-12 h-12 rounded-2xl bg-orange-50 text-[#ff551f] flex items-center justify-center mb-4 group-hover:bg-[#ff551f] group-hover:text-white transition-all shadow-sm">
+<i class="w-6 h-6" data-lucide="pie-chart"></i>
+</div>
+<h3 class="font-bold text-slate-900 text-lg mb-1.5 font-rubik">פנסיה והשתלמות</h3>
+<p class="text-slate-500 text-xs leading-relaxed">חיסכון פנסיוני מוביל תשואות עם שקיפות מלאה וניהול חכם באפליקציה.</p>
+</div>
+<!-- Card 4 -->
+<div class="bg-white rounded-2xl p-6 shadow-lg border border-slate-100 hover:border-[#ff551f] transition-all duration-300 hover:-translate-y-1 group">
+<div class="w-12 h-12 rounded-2xl bg-orange-50 text-[#ff551f] flex items-center justify-center mb-4 group-hover:bg-[#ff551f] group-hover:text-white transition-all shadow-sm">
+<i class="w-6 h-6" data-lucide="activity"></i>
+</div>
+<h3 class="font-bold text-slate-900 text-lg mb-1.5 font-rubik">ביטוח בריאות וחיים</h3>
+<p class="text-slate-500 text-xs leading-relaxed">כיסוי רפואי רחב, החזרים דיגיטליים ישירים והתייעצות עם רופאים מומחים.</p>
+</div>
+</div>
+</section>
+<!-- ==================== RESPONSIVE AI CHAT WIDGET (BOTTOM-LEFT ANCHOR) ==================== -->
+<!-- Fully Responsive: Desktop floats at left-6 bottom-6; Mobile converts into seamless bottom sheet -->
+<div class="fixed left-0 sm:left-6 bottom-0 sm:bottom-6 z-50 flex flex-col items-start gap-3 w-full sm:w-auto" id="widget-container">
+<!-- CHAT POPUP WINDOW -->
+<div class="w-full sm:w-[410px] md:w-[425px] h-[92vh] sm:h-[620px] max-h-[92vh] sm:max-h-[82vh] bg-white rounded-t-3xl sm:rounded-2xl shadow-floating border border-slate-200/90 flex flex-col overflow-hidden transition-all duration-300 origin-bottom-left transform scale-100" id="chat-window">
+<!-- 1. CHAT HEADER IN PHOENIX NAVY -->
+<div class="bg-[#0c172d] text-white p-3.5 sm:p-4 flex items-center justify-between border-b border-[#1d325c] relative shrink-0">
+<!-- Brand / Identity -->
+<div class="flex items-center gap-3">
+<div class="relative">
+<div class="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-[#ff551f] to-[#ff7b39] flex items-center justify-center text-white font-black shadow-md">
+<i class="w-5 h-5 text-white" data-lucide="sparkles"></i>
+</div>
+<!-- Online status beacon -->
+<span class="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 bg-emerald-500 border-2 border-[#0c172d] rounded-full" title="מחובר ומאומת"></span>
+</div>
+<div>
+<div class="flex items-center gap-2">
+<h2 class="font-bold text-base leading-tight text-white tracking-wide font-rubik">עוזר השירות הפניקס</h2>
+<span class="bg-[#ff551f]/20 text-[#ff8156] text-[10px] font-bold px-1.5 py-0.5 rounded border border-[#ff551f]/40 uppercase tracking-wider">RAG AI</span>
+</div>
+<p class="text-slate-400 text-xs flex items-center gap-1.5 mt-0.5">
+<span>עונה על בסיס מידע רשמי מ-fnx.co.il</span>
+</p>
+</div>
+</div>
+<!-- Window Actions -->
+<div class="flex items-center gap-1 text-slate-300">
+<button class="p-1.5 hover:text-white hover:bg-white/10 rounded-lg transition-colors" id="btn-reset" title="התחל שיחה חדשה">
+<i class="w-4 h-4" data-lucide="rotate-ccw"></i>
+</button>
+<button class="p-1.5 hover:text-white hover:bg-white/10 rounded-lg transition-colors" id="btn-minimize" title="סגור / מזער">
+<i class="w-5 h-5 sm:hidden" data-lucide="x"></i>
+<i class="w-4 h-4 hidden sm:inline" data-lucide="minus"></i>
+</button>
+</div>
+</div>
+<!-- 2. MANDATORY AI DISCLAIMER BANNER -->
+<div class="bg-amber-50/95 border-b border-amber-200/90 px-3.5 py-2.5 flex items-start gap-2.5 text-[11px] text-amber-950 leading-snug shrink-0">
+<i class="w-4 h-4 text-amber-700 shrink-0 mt-0.5" data-lucide="shield-alert"></i>
+<div>
+<span class="font-bold">לתשומת לבך:</span>
+          הצ'אט מבוסס AI ועשוי לטעות. המידע הינו אינפורמטיבי בלבד ומבוסס על האתר הציבורי.
+          <span class="font-semibold text-red-700 underline decoration-red-300">אין להזין מידע אישי או רגיש.</span>
+</div>
+</div>
+<!-- 3. MESSAGES CONTAINER WITH SCROLL-TO-BOTTOM CAPABILITY -->
+<div class="relative flex-1 overflow-hidden bg-slate-50 flex flex-col">
+<!-- Messages Scroll Area -->
+<div class="flex-1 overflow-y-auto p-3.5 sm:p-4 space-y-4 custom-scroll relative" id="messages-container">
+<!-- System Status Tag -->
+<div class="text-center my-1">
+<span class="text-[10px] bg-slate-200/80 text-slate-600 px-3 py-1 rounded-full font-medium inline-flex items-center gap-1.5">
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+              מאומת מול 1,091 עמודי fnx.co.il • מודל e5-hybrid
+            </span>
+</div>
+<!-- Bot Message 1: Initial Greeting & Suggestions -->
+<div class="flex items-start gap-2.5">
+<div class="w-7 h-7 rounded-lg bg-[#ff551f] text-white flex items-center justify-center shrink-0 shadow-sm mt-0.5">
+<i class="w-4 h-4" data-lucide="bot"></i>
+</div>
+<div class="max-w-[85%] bg-white border border-slate-200 rounded-2xl rounded-tr-none p-3.5 shadow-bubble text-slate-800 text-sm leading-relaxed">
+<p class="font-semibold text-slate-900 mb-1">שלום! אני עוזר השירות החכם של הפניקס 👋</p>
+<p class="text-xs text-slate-600 mb-3">
+                אני עונה בדיוק ובשקיפות אך ורק מתוך עמודי האתר הרשמיים של הפניקס, ומספק קישורים ישירים לטפסים ולמקורות.
+              </p>
+<!-- Quick suggestion chips -->
+<div class="text-xs font-semibold text-slate-500 mb-2">נושאים נפוצים לבירור מיידי:</div>
+<div class="flex flex-wrap gap-1.5" id="suggested-queries">
+<button class="bg-slate-100 hover:bg-orange-50 hover:text-[#ff551f] hover:border-[#ff551f]/40 text-slate-700 text-xs px-2.5 py-1.5 rounded-lg border border-slate-200 transition-colors text-right flex items-center gap-1.5" onclick="handleSampleQuery('יש לי נזילה בבית, איך מגישים תביעה?')">
+<i class="w-3.5 h-3.5 text-blue-500" data-lucide="droplet"></i>
+                  נזילה בבית ותביעת צנרת
+                </button>
+<button class="bg-slate-100 hover:bg-orange-50 hover:text-[#ff551f] hover:border-[#ff551f]/40 text-slate-700 text-xs px-2.5 py-1.5 rounded-lg border border-slate-200 transition-colors text-right flex items-center gap-1.5" onclick="handleSampleQuery('איך מזמינים גרר ושירותי דרך ברכב?')">
+<i class="w-3.5 h-3.5 text-amber-600" data-lucide="truck"></i>
+                  הזמנת גרר ושירות דרך
+                </button>
+<button class="bg-slate-100 hover:bg-orange-50 hover:text-[#ff551f] hover:border-[#ff551f]/40 text-slate-700 text-xs px-2.5 py-1.5 rounded-lg border border-slate-200 transition-colors text-right flex items-center gap-1.5" onclick="handleSampleQuery('איפה מורידים טופס הצהרת בריאות ופדיון?')">
+<i class="w-3.5 h-3.5 text-emerald-600" data-lucide="file-down"></i>
+                  טפסים להורדה ו-PDF
+                </button>
+</div>
+</div>
+</div>
+<!-- User Message Sample -->
+<div class="flex items-start justify-end gap-2.5">
+<div class="max-w-[85%] bg-[#0c172d] text-white rounded-2xl rounded-tl-none p-3.5 shadow-sm text-sm leading-relaxed">
+              יש לי נזילה בבית, איך מגישים תביעה ומה הנוהל לגבי שרברב שבהסדר?
+            </div>
+<div class="w-7 h-7 rounded-lg bg-slate-300 text-slate-700 flex items-center justify-center shrink-0 shadow-sm mt-0.5">
+<i class="w-4 h-4" data-lucide="user"></i>
+</div>
+</div>
+<!-- Bot Response With Typewriter Live Effect -->
+<div class="flex items-start gap-2.5" id="dynamic-bot-response">
+<div class="w-7 h-7 rounded-lg bg-[#ff551f] text-white flex items-center justify-center shrink-0 shadow-sm mt-0.5">
+<i class="w-4 h-4" data-lucide="bot"></i>
+</div>
+<div class="max-w-[88%] bg-white border border-slate-200 rounded-2xl rounded-tr-none p-3.5 shadow-bubble text-slate-800 text-sm leading-relaxed relative">
+<!-- Real-time Typing Stream Block -->
+<div class="cursor-blink text-slate-800 text-xs leading-relaxed space-y-2 mb-3" id="typewriter-text">
+<!-- Text populated character-by-character via JS -->
+</div>
+<!-- Structured citation / Source Pill (revealed once typing completes) -->
+<div class="hidden pt-2 mt-2 border-t border-slate-100 flex flex-col gap-2" id="source-badge">
+<div class="flex items-center justify-between text-[11px] text-slate-500">
+<span class="flex items-center gap-1 text-emerald-600 font-semibold">
+<i class="w-3.5 h-3.5" data-lucide="check-circle-2"></i>
+                    מקור מאומת מתוך אתר הפניקס
+                  </span>
+<span class="text-slate-400">ציון דיוק: 98%</span>
+</div>
+<a class="flex items-center justify-between p-2 rounded-xl bg-orange-50/70 hover:bg-orange-100/80 border border-orange-200/60 transition-colors group" href="https://www.fnx.co.il/claims-customer-service/home-insurance/pipe-damage/" target="_blank">
+<div class="flex items-center gap-2 overflow-hidden">
+<i class="w-3.5 h-3.5 text-[#ff551f] shrink-0" data-lucide="external-link"></i>
+<span class="text-xs font-semibold text-slate-800 truncate">עמוד תביעות נזקי צנרת ומים - הפניקס</span>
+</div>
+<i class="w-3.5 h-3.5 text-[#ff551f] transform group-hover:-translate-x-0.5 transition-transform" data-lucide="arrow-left"></i>
+</a>
+<div class="flex gap-2 mt-1">
+<a class="flex-1 bg-[#ff551f] hover:bg-[#e6440f] text-white text-xs font-bold py-2 px-3 rounded-lg text-center flex items-center justify-center gap-1.5 transition-colors shadow-sm" href="https://homeclaim.fnx.co.il" target="_blank">
+<i class="w-3.5 h-3.5" data-lucide="file-edit"></i>
+                    פתיחת טופס דיגיטלי (homeclaim)
+                  </a>
+</div>
+</div>
+</div>
+</div>
+<!-- Bottom anchor for auto-scroll calculation -->
+<div id="scroll-bottom-anchor"></div>
+</div>
+<!-- 4. FLOATING "SCROLL TO BOTTOM" PILL BUTTON -->
+<div class="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 transition-all duration-300 opacity-0 pointer-events-none transform translate-y-2" id="scroll-to-bottom-btn">
+<button class="bg-[#0c172d]/95 hover:bg-[#0c172d] text-white text-xs font-bold px-3.5 py-1.5 rounded-full shadow-lg border border-slate-700 flex items-center gap-1.5 backdrop-blur-sm transition-all hover:scale-105" onclick="scrollToBottomSmooth()">
+<span>גלול לסוף השיחה</span>
+<i class="w-3.5 h-3.5 text-[#ff551f] animate-bounce" data-lucide="arrow-down"></i>
+</button>
+</div>
+</div>
+<!-- 5. CHAT INPUT BAR -->
+<div class="p-3 bg-white border-t border-slate-200 shrink-0">
+<form class="flex items-center gap-2" id="chat-form" onsubmit="event.preventDefault(); submitUserMessage();">
+<div class="relative flex-1">
+<input autocomplete="off" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#ff551f]/30 focus:border-[#ff551f] transition-all pr-3 pl-9" id="user-input" placeholder="שאלו כל שאלה לגבי ביטוח, פנסיה או תביעה..." type="text">
+<button class="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors" title="הקלטה קולית" type="button">
+<i class="w-4 h-4" data-lucide="mic"></i>
+</button>
+</div>
+<button class="bg-[#ff551f] hover:bg-[#e6440f] text-white font-bold p-2.5 rounded-xl shadow-md transition-all active:scale-95 flex items-center justify-center shrink-0" title="שלח הודעה" type="submit">
+<i class="w-4 h-4 transform -rotate-90" data-lucide="send"></i>
+</button>
+</form>
+<div class="flex items-center justify-between text-[10px] text-slate-400 mt-2 px-1">
+<span>אינדקס פעיל: 14,370 מקטעים • e5 + BM25</span>
+<span class="hover:underline cursor-pointer">תנאי שימוש</span>
+</div>
+</div>
+</div>
+<!-- ==================== THE FLOATING LAUNCHER BUTTON AT BOTTOM-LEFT ==================== -->
+<div class="w-full sm:w-auto px-4 sm:px-0 pb-4 sm:pb-0 flex justify-start">
+<button aria-label="פתח צ'אטבוט הפניקס" class="group relative flex items-center gap-3 bg-[#0c172d] hover:bg-[#132342] text-white pl-4 pr-5 py-3 rounded-full shadow-2xl border-2 border-[#ff551f] transition-all duration-300 transform hover:scale-105 active:scale-95" id="chat-toggle-btn" onclick="toggleChatWindow()">
+<!-- Pulse Effect Ring in Phoenix Orange -->
+<span class="absolute inset-0 rounded-full pulse-animation pointer-events-none"></span>
+<!-- Icon with dynamic badge -->
+<div class="relative w-8 h-8 rounded-full bg-[#ff551f] text-white flex items-center justify-center font-bold shadow-md">
+<i class="w-4 h-4" data-lucide="message-square-text"></i>
+<span class="absolute -top-1 -right-1 w-2.5 h-2.5 bg-emerald-500 border-2 border-[#0c172d] rounded-full"></span>
+</div>
+<!-- Button Labels -->
+<div class="text-right">
+<div class="text-xs font-bold text-white flex items-center gap-1.5 font-rubik">
+<span>עוזר השירות של הפניקס</span>
+<span class="bg-[#ff551f]/20 text-[#ff7b39] text-[9px] px-1 py-0.2 rounded font-semibold">AI</span>
+</div>
+<div class="text-[10px] text-slate-300">מענה מיידי מתוך האתר הרשמי</div>
+</div>
+<!-- Toggle arrow indicator -->
+<i class="w-4 h-4 text-[#ff551f] group-hover:-translate-y-0.5 transition-transform mr-1" data-lucide="chevron-up" id="launcher-chevron"></i>
+</button>
+</div>
+</div>
+<!-- SCRIPT FOR TYPEWRITER EFFECT, SCROLL TRACKING, AND RESPONSIVE INTERACTIVITY -->
+<script>
+    // Initialize Lucide icons
+    lucide.createIcons();
+
+    // DOM Elements
+    const chatWindow = document.getElementById('chat-window');
+    const messagesContainer = document.getElementById('messages-container');
+    const scrollToBottomBtn = document.getElementById('scroll-to-bottom-btn');
+    const scrollBottomAnchor = document.getElementById('scroll-bottom-anchor');
+    const typewriterEl = document.getElementById('typewriter-text');
+    const sourceBadge = document.getElementById('source-badge');
+    const userInput = document.getElementById('user-input');
+    const mobileMenuBtn = document.getElementById('mobile-menu-btn');
+    const mobileMenu = document.getElementById('mobile-menu');
+
+    // Mobile nav menu toggle
+    if (mobileMenuBtn && mobileMenu) {
+      mobileMenuBtn.addEventListener('click', () => {
+        mobileMenu.classList.toggle('hidden');
+      });
+    }
+
+    // The authentic response text to type out smoothly character-by-character
+    const fullAnswerText = `במקרה של נזילת מים או פיצוץ צנרת בדירה המבוטחת, ניתן להגיש תביעה דיגיטלית ב-3 שלבים:
+
+1. צילום מוקד הנזק: יש לתעד את מקור הדליפה, הרטיבות בקירות והנזק לתכולה לפני תחילת עבודות.
+2. בחירת שרברב: 
+   • שרברב שבהסדר הפניקס: השתתפות עצמית מופחתת והתחשבנות ישירה ללא צורך בהוצאת כספים מראש.
+   • שרברב פרטי לבחירתך: נדרשת הגשת חשבונית מס ודוח טכני מפורט.
+3. פתיחת תביעה מקוונת: יש להגיש את הטופס הדיגיטלי בפורטל התביעות (homeclaim) בצירוף התמונות.
+
+באתר מצוין כי מוקד החירום הטלפוני לנזקי צנרת פעיל 24/7 במספר 5040*.`;
+
+    // Typewriter state
+    let charIndex = 0;
+    let isTyping = true;
+    let typingSpeed = 16; // milliseconds per character
+
+    function typeNextChar() {
+      if (charIndex < fullAnswerText.length) {
+        const char = fullAnswerText.charAt(charIndex);
+        if (char === '\n') {
+          typewriterEl.innerHTML += '<br>';
+        } else {
+          typewriterEl.innerHTML += char;
+        }
+        charIndex++;
+        // Maintain scroll at bottom during typing
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        setTimeout(typeNextChar, typingSpeed);
+      } else {
+        // Typing finished
+        isTyping = false;
+        typewriterEl.classList.remove('cursor-blink');
+        sourceBadge.classList.remove('hidden');
+        lucide.createIcons();
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+      }
+    }
+
+    // Start typewriter effect automatically on load
+    window.addEventListener('DOMContentLoaded', () => {
+      setTimeout(typeNextChar, 500);
+    });
+
+    // Detect user scrolling away from bottom to show the "Scroll to Bottom" button
+    messagesContainer.addEventListener('scroll', () => {
+      const scrollPos = messagesContainer.scrollTop + messagesContainer.clientHeight;
+      const totalHeight = messagesContainer.scrollHeight;
+      const distanceFromBottom = totalHeight - scrollPos;
+
+      if (distanceFromBottom > 70) {
+        scrollToBottomBtn.classList.remove('opacity-0', 'pointer-events-none', 'translate-y-2');
+        scrollToBottomBtn.classList.add('opacity-100', 'translate-y-0');
+      } else {
+        scrollToBottomBtn.classList.add('opacity-0', 'pointer-events-none', 'translate-y-2');
+        scrollToBottomBtn.classList.remove('opacity-100', 'translate-y-0');
+      }
+    });
+
+    // Smooth Scroll to bottom
+    function scrollToBottomSmooth() {
+      messagesContainer.scrollTo({
+        top: messagesContainer.scrollHeight,
+        behavior: 'smooth'
+      });
+    }
+
+    // Toggle Chat Window minimize/open
+    let isChatOpen = true;
+    function toggleChatWindow() {
+      isChatOpen = !isChatOpen;
+      const chevron = document.getElementById('launcher-chevron');
+      if (isChatOpen) {
+        chatWindow.classList.remove('hidden', 'scale-90', 'opacity-0');
+        chatWindow.classList.add('scale-100', 'opacity-100');
+        if (chevron) chevron.setAttribute('data-lucide', 'chevron-down');
+      } else {
+        chatWindow.classList.add('scale-90', 'opacity-0');
+        setTimeout(() => {
+          chatWindow.classList.add('hidden');
+        }, 200);
+        if (chevron) chevron.setAttribute('data-lucide', 'chevron-up');
+      }
+      lucide.createIcons();
+    }
+
+    document.getElementById('btn-minimize').addEventListener('click', toggleChatWindow);
+
+    document.getElementById('btn-reset').addEventListener('click', () => {
+      typewriterEl.innerHTML = '';
+      typewriterEl.classList.add('cursor-blink');
+      sourceBadge.classList.add('hidden');
+      charIndex = 0;
+      isTyping = true;
+      typeNextChar();
+    });
+
+    // Sample question pill click
+    function handleSampleQuery(queryText) {
+      userInput.value = queryText;
+      submitUserMessage();
+    }
+
+    // Handle user submitting message
+    function submitUserMessage() {
+      const text = userInput.value.trim();
+      if (!text) return;
+
+      // Append user bubble
+      const userBubble = document.createElement('div');
+      userBubble.className = "flex items-start justify-end gap-2.5";
+      userBubble.innerHTML = `
+        <div class="max-w-[85%] bg-[#0c172d] text-white rounded-2xl rounded-tl-none p-3.5 shadow-sm text-sm leading-relaxed">
+          ${escapeHtml(text)}
+        </div>
+        <div class="w-7 h-7 rounded-lg bg-slate-300 text-slate-700 flex items-center justify-center shrink-0 shadow-sm mt-0.5">
+          <i data-lucide="user" class="w-4 h-4"></i>
+        </div>
+      `;
+      messagesContainer.insertBefore(userBubble, scrollBottomAnchor);
+
+      userInput.value = '';
+      lucide.createIcons();
+      scrollToBottomSmooth();
+
+      // Show typing indicator bubble
+      const typingIndicator = document.createElement('div');
+      typingIndicator.id = "temp-indicator";
+      typingIndicator.className = "flex items-start gap-2.5";
+      typingIndicator.innerHTML = `
+        <div class="w-7 h-7 rounded-lg bg-[#ff551f] text-white flex items-center justify-center shrink-0 shadow-sm mt-0.5">
+          <i data-lucide="bot" class="w-4 h-4"></i>
+        </div>
+        <div class="bg-white border border-slate-200 rounded-2xl rounded-tr-none px-4 py-3 shadow-bubble flex items-center gap-1.5 text-xs text-slate-500">
+          <span class="w-2 h-2 rounded-full bg-[#ff551f] animate-pulse"></span>
+          <span>מחפש ב-1,091 עמודי האתר ומפעיל RAG היברידי...</span>
+        </div>
+      `;
+      messagesContainer.insertBefore(typingIndicator, scrollBottomAnchor);
+      lucide.createIcons();
+      scrollToBottomSmooth();
+
+      // Simulate streaming response
+      setTimeout(() => {
+        const ind = document.getElementById('temp-indicator');
+        if (ind) ind.remove();
+
+        const newBotBubble = document.createElement('div');
+        newBotBubble.className = "flex items-start gap-2.5";
+        const uniqueId = 'stream-' + Date.now();
+        newBotBubble.innerHTML = `
+          <div class="w-7 h-7 rounded-lg bg-[#ff551f] text-white flex items-center justify-center shrink-0 shadow-sm mt-0.5">
+            <i data-lucide="bot" class="w-4 h-4"></i>
+          </div>
+          <div class="max-w-[88%] bg-white border border-slate-200 rounded-2xl rounded-tr-none p-3.5 shadow-bubble text-slate-800 text-sm leading-relaxed">
+            <div id="${uniqueId}" class="cursor-blink text-slate-800 text-xs leading-relaxed space-y-2 mb-2"></div>
+            <div class="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
+              <span class="text-emerald-600 font-semibold flex items-center gap-1">
+                <i data-lucide="check-circle" class="w-3.5 h-3.5"></i>
+                מקור: fnx.co.il/service
+              </span>
+              <a href="#" class="text-[#ff551f] hover:underline">קרא עוד באתר</a>
+            </div>
+          </div>
+        `;
+        messagesContainer.insertBefore(newBotBubble, scrollBottomAnchor);
+        lucide.createIcons();
+
+        const responseSample = `לפי המידע העדכני באתר הפניקס בנושא זה, השירות ניתן ישירות בדיגיטל דרך אפליקציית הפניקס או בפורטל השירות. במידה ומדובר בבקשה לפוליסה ספציפית, ניתן להתחבר לאזור האישי באמצעות קוד חד-פעמי (SMS).`;
+        let sIdx = 0;
+        const targetDiv = document.getElementById(uniqueId);
+        function typeStream() {
+          if (sIdx < responseSample.length) {
+            targetDiv.innerHTML += responseSample.charAt(sIdx);
+            sIdx++;
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            setTimeout(typeStream, 15);
+          } else {
+            targetDiv.classList.remove('cursor-blink');
+          }
+        }
+        typeStream();
+
+      }, 900);
+    }
+
+    function escapeHtml(text) {
+      const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+      return text.replace(/[&<>"']/g, function(m) { return map[m]; });
+    }
+  </script>
+</body></html>

@@ -11,7 +11,8 @@
     python -m phoenix_rag.cli chat                             # interactive Hebrew chat
     python -m phoenix_rag.cli eval                             # eval/questions.jsonl (legacy: config/eval.yaml)
     python -m phoenix_rag.cli scenarios                        # Day-3 A/B/C
-    python -m phoenix_rag.cli serve [--port 7860]              # local chat UI
+    python -m phoenix_rag.cli run [--port 8080]                # FastAPI + עיצוב.txt UI (Day 5)
+    python -m phoenix_rag.cli serve [--port 7860]              # lightweight stdlib chat UI
     python -m phoenix_rag.cli status               # store counts and last runs
 """
 
@@ -401,6 +402,40 @@ def cmd_eval(cfg: Config, args: argparse.Namespace) -> int:
     return 1 if failed else 0
 
 
+def _ensure_streamlit_first_run() -> None:
+    """Skip Streamlit's interactive 'Welcome, enter email' prompt on first launch."""
+    creds_dir = Path.home() / ".streamlit"
+    creds_file = creds_dir / "credentials.toml"
+    if not creds_file.is_file():
+        creds_dir.mkdir(parents=True, exist_ok=True)
+        creds_file.write_text('[general]\nemail = ""\n', encoding="utf-8")
+
+
+def cmd_run(cfg: Config, args: argparse.Namespace) -> int:
+    import uvicorn
+
+    from app.web import create_app
+
+    _setup_logging(cfg, "run")
+    app = create_app(cfg)
+    url = f"http://{args.host}:{args.port}/"
+    print("")
+    print("=" * 60)
+    print("  Phoenix RAG — FastAPI (עיצוב.txt)")
+    print(f"  Open in browser: {url}")
+    print("  (If you see a Streamlit 'Deploy' button, wrong app/port.)")
+    print("=" * 60)
+    print("")
+    uvicorn.run(
+        app,
+        host=args.host,
+        port=args.port,
+        log_level="info",
+        access_log=True,
+    )
+    return 0
+
+
 def cmd_serve(cfg: Config, args: argparse.Namespace) -> int:
     from .answering.ui import serve
 
@@ -509,7 +544,13 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--no-rerank", action="store_true")
     p.set_defaults(func=cmd_eval)
 
-    p = sub.add_parser("serve", help="local Hebrew chat UI in the browser")
+    p = sub.add_parser("run", help="FastAPI chat UI (full עיצוב.txt fidelity)")
+    p.add_argument("--host", default="127.0.0.1")
+    p.add_argument("--port", type=int, default=8080)
+    p.add_argument("--headless", action="store_true", help="do not open a browser tab")
+    p.set_defaults(func=cmd_run)
+
+    p = sub.add_parser("serve", help="lightweight stdlib chat UI in the browser")
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=7860)
     p.set_defaults(func=cmd_serve)
