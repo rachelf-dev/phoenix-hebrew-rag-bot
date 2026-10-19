@@ -21,7 +21,7 @@ from phoenix_rag.indexing.retrieve import Hit  # noqa: E402
 SAMPLE_QUESTIONS = [
     "יש לי נזילה בבית, איך מגישים תביעה?",
     "איך מזמינים גרר ושירותי דרך ברכב?",
-    "איפה מורידים טופס הצהרת בריאות?",
+    "נשבר לי דוד השמש, מה עושים?",
 ]
 
 GREETING = (

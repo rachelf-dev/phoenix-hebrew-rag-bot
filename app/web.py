@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from app.citation_labels import norm_url_key, page_title_index, sources_for_answer, title_for_citation_url
 from phoenix_rag.answering.pipeline import Pipeline
 from phoenix_rag.config import Config
 from phoenix_rag.indexing.retrieve import Hit
@@ -33,16 +34,21 @@ class AskRequest(BaseModel):
     history: list[HistoryTurn] = Field(default_factory=list)
 
 
-def _hits_payload(hits: list[Hit], limit: int = 5) -> list[dict[str, Any]]:
+def _hits_payload(hits: list[Hit], cfg: Config, limit: int = 5) -> list[dict[str, Any]]:
+    idx = page_title_index(cfg)
     out: list[dict[str, Any]] = []
     for h in hits[:limit]:
         url = h.display_url or h.url
+        page_h1 = idx.get(norm_url_key(url), "") if url else ""
+        if not page_h1 and url:
+            page_h1 = title_for_citation_url(url, hits, cfg) or ""
         preview = (h.text or "").strip().replace("\n", " ")
         if len(preview) > 420:
             preview = preview[:417] + "…"
         out.append({
             "chunk_id": h.chunk_id,
             "url": url,
+            "page_h1": page_h1,
             "page_title": h.page_title or "",
             "heading_path": h.heading_path or "",
             "score": round(float(h.score or 0), 4),
@@ -59,6 +65,7 @@ def create_app(cfg: Config) -> FastAPI:
     pipe = Pipeline(cfg)
     log.info("loading embedder + index for web UI…")
     pipe.ensure()
+    page_title_index(cfg)
     lock = threading.Lock()
     disclaimer = cfg.messages.get("disclaimer") or ""
 
@@ -102,15 +109,18 @@ def create_app(cfg: Config) -> FastAPI:
         history = [{"role": h.role, "content": h.content} for h in body.history]
         with lock:
             ans = pipe.ask(q, history=history)
+        source_cards = sources_for_answer(
+            ans.citations, ans.hits, cfg, status=ans.status
+        )
         return {
             "status": ans.status,
             "answer": ans.text,
             "answer_text": ans.text,
             "answer_type": ans.answer_type,
             "citations": ans.citations,
-            "sources": ans.citations,
+            "sources": source_cards,
             "used_chunk_ids": ans.used_chunk_ids,
-            "hits": _hits_payload(ans.hits),
+            "hits": _hits_payload(ans.hits, cfg),
             "disclaimer": disclaimer,
         }
 

@@ -3,6 +3,7 @@
 <meta charset="utf-8">
 <meta content="width=device-width, initial-scale=1.0" name="viewport">
 <title>הפניקס - ביטוח, השקעות ואשראי | צ'אטבוט Phoenix RAG</title>
+<link href="/static/phoenix-favicon.png?v=2" rel="icon" type="image/png">
 <!-- Tailwind CSS CDN with forms & container queries -->
 <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
 <!-- Google Fonts: Assistant & Rubik -->
@@ -77,6 +78,35 @@
     }
     .pulse-animation {
       animation: pulse-ring 2.6s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    }
+    /* Chat widget: mutually exclusive launcher vs panel (see phoenix_chat.js data-chat) */
+    #widget-container {
+      pointer-events: none;
+    }
+    #widget-container #chat-window,
+    #widget-container #launcher-wrap {
+      pointer-events: auto;
+    }
+    #widget-container[data-chat="open"] #launcher-wrap {
+      display: none !important;
+    }
+    #widget-container[data-chat="closed"] #chat-window.chat-panel-closed {
+      display: none !important;
+    }
+    @media (max-width: 639px) {
+      #widget-container[data-chat="open"] {
+        left: 0;
+        right: 0;
+        bottom: 0;
+        width: 100%;
+      }
+      #widget-container[data-chat="open"] #chat-window {
+        width: 100%;
+        max-width: 100%;
+        height: 92vh;
+        max-height: 92vh;
+        border-radius: 1.5rem 1.5rem 0 0;
+      }
     }
   </style>
 </head>
@@ -347,28 +377,22 @@
 </section>
 <!-- ==================== RESPONSIVE AI CHAT WIDGET (BOTTOM-LEFT ANCHOR) ==================== -->
 <!-- Fully Responsive: Desktop floats at left-6 bottom-6; Mobile converts into seamless bottom sheet -->
-<div class="fixed left-0 sm:left-6 bottom-0 sm:bottom-6 z-50 flex flex-col items-start gap-3 w-full sm:w-auto" id="widget-container">
-<!-- CHAT POPUP WINDOW -->
-<div class="w-full sm:w-[410px] md:w-[425px] h-[92vh] sm:h-[620px] max-h-[92vh] sm:max-h-[82vh] bg-white rounded-t-3xl sm:rounded-2xl shadow-floating border border-slate-200/90 flex flex-col overflow-hidden transition-all duration-300 origin-bottom-left transform scale-100" id="chat-window">
+<div class="fixed left-0 sm:left-6 bottom-0 sm:bottom-6 z-50 flex flex-col items-stretch sm:items-start gap-0 sm:gap-3 w-full sm:w-auto" data-chat="closed" id="widget-container">
+<!-- CHAT POPUP WINDOW (above launcher on desktop; full bottom sheet on mobile when open) -->
+<div aria-hidden="true" class="chat-panel-closed w-full sm:w-[410px] md:w-[425px] h-[92vh] sm:h-[620px] max-h-[92vh] sm:max-h-[82vh] bg-white rounded-t-3xl sm:rounded-2xl shadow-floating border border-slate-200/90 flex flex-col overflow-hidden transition-all duration-300 ease-out origin-bottom-left transform scale-90 opacity-0 pointer-events-none" id="chat-window">
 <!-- 1. CHAT HEADER IN PHOENIX NAVY -->
 <div class="bg-[#0c172d] text-white p-3.5 sm:p-4 flex items-center justify-between border-b border-[#1d325c] relative shrink-0">
 <!-- Brand / Identity -->
 <div class="flex items-center gap-3">
 <div class="relative">
-<div class="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-[#ff551f] to-[#ff7b39] flex items-center justify-center text-white font-black shadow-md">
-<i class="w-5 h-5 text-white" data-lucide="sparkles"></i>
+<div class="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-white flex items-center justify-center shadow-md p-1.5">
+<img alt="" class="w-full h-full object-contain" src="/static/phoenix-logo.png?v=2">
 </div>
 <!-- Online status beacon -->
 <span class="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 bg-emerald-500 border-2 border-[#0c172d] rounded-full" title="מחובר ומאומת"></span>
 </div>
 <div>
-<div class="flex items-center gap-2">
 <h2 class="font-bold text-base leading-tight text-white tracking-wide font-rubik">עוזר השירות הפניקס</h2>
-<span class="bg-[#ff551f]/20 text-[#ff8156] text-[10px] font-bold px-1.5 py-0.5 rounded border border-[#ff551f]/40 uppercase tracking-wider">RAG AI</span>
-</div>
-<p class="text-slate-400 text-xs flex items-center gap-1.5 mt-0.5">
-<span>עונה על בסיס מידע רשמי מ-fnx.co.il</span>
-</p>
 </div>
 </div>
 <!-- Window Actions -->
@@ -382,26 +406,10 @@
 </button>
 </div>
 </div>
-<!-- 2. MANDATORY AI DISCLAIMER BANNER -->
-<div class="bg-amber-50/95 border-b border-amber-200/90 px-3.5 py-2.5 flex items-start gap-2.5 text-[11px] text-amber-950 leading-snug shrink-0">
-<i class="w-4 h-4 text-amber-700 shrink-0 mt-0.5" data-lucide="shield-alert"></i>
-<div>
-<span class="font-bold">לתשומת לבך:</span>
-          הצ'אט מבוסס AI ועשוי לטעות. המידע הינו אינפורמטיבי בלבד ומבוסס על האתר הציבורי.
-          <span class="font-semibold text-red-700 underline decoration-red-300">אין להזין מידע אישי או רגיש.</span>
-</div>
-</div>
-<!-- 3. MESSAGES CONTAINER WITH SCROLL-TO-BOTTOM CAPABILITY -->
+<!-- 2. MESSAGES CONTAINER WITH SCROLL-TO-BOTTOM CAPABILITY -->
 <div class="relative flex-1 overflow-hidden bg-slate-50 flex flex-col">
 <!-- Messages Scroll Area -->
 <div class="flex-1 overflow-y-auto p-3.5 sm:p-4 space-y-4 custom-scroll relative" id="messages-container">
-<!-- System Status Tag -->
-<div class="text-center my-1">
-<span class="text-[10px] bg-slate-200/80 text-slate-600 px-3 py-1 rounded-full font-medium inline-flex items-center gap-1.5">
-<span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-              <span id="index-status-line">מאומת מול fnx.co.il • e5-hybrid</span>
-            </span>
-</div>
 <!-- Bot Message 1: Initial Greeting & Suggestions -->
 <div class="flex items-start gap-2.5" id="greeting-block">
 <div class="w-7 h-7 rounded-lg bg-[#ff551f] text-white flex items-center justify-center shrink-0 shadow-sm mt-0.5">
@@ -423,9 +431,9 @@
 <i class="w-3.5 h-3.5 text-amber-600" data-lucide="truck"></i>
                   הזמנת גרר ושירות דרך
                 </button>
-<button class="bg-slate-100 hover:bg-orange-50 hover:text-[#ff551f] hover:border-[#ff551f]/40 text-slate-700 text-xs px-2.5 py-1.5 rounded-lg border border-slate-200 transition-colors text-right flex items-center gap-1.5" onclick="handleSampleQuery('איפה מורידים טופס הצהרת בריאות ופדיון?')">
-<i class="w-3.5 h-3.5 text-emerald-600" data-lucide="file-down"></i>
-                  טפסים להורדה ו-PDF
+<button class="bg-slate-100 hover:bg-orange-50 hover:text-[#ff551f] hover:border-[#ff551f]/40 text-slate-700 text-xs px-2.5 py-1.5 rounded-lg border border-slate-200 transition-colors text-right flex items-center gap-1.5" onclick="handleSampleQuery('נשבר לי דוד השמש, מה עושים?')">
+<i class="w-3.5 h-3.5 text-orange-500" data-lucide="sun"></i>
+                  נזק לדודי שמש / קולטים
                 </button>
 </div>
 </div>
@@ -454,29 +462,25 @@
 <i class="w-4 h-4 transform -rotate-90" data-lucide="send"></i>
 </button>
 </form>
-<div class="flex items-center justify-between text-[10px] text-slate-400 mt-2 px-1">
-<span id="footer-index-line">אינדקס פעיל • e5 + BM25</span>
-<span class="hover:underline cursor-pointer">תנאי שימוש</span>
+<div class="flex items-center justify-between gap-2 text-[10px] text-amber-900/75 mt-2 px-1 leading-snug">
+<span id="footer-disclaimer-line">הצ'אט מבוסס בינה מלאכותית ועשוי לטעות, אין להזין מידע אישי.</span>
+<span class="hover:underline cursor-pointer text-slate-400 shrink-0">תנאי שימוש</span>
 </div>
 </div>
 </div>
 <!-- ==================== THE FLOATING LAUNCHER BUTTON AT BOTTOM-LEFT ==================== -->
-<div class="w-full sm:w-auto px-4 sm:px-0 pb-4 sm:pb-0 flex justify-start">
+<div aria-hidden="false" class="w-full sm:w-auto px-4 sm:px-0 pb-4 sm:pb-0 flex justify-start shrink-0" id="launcher-wrap">
 <button aria-label="פתח צ'אטבוט הפניקס" class="group relative flex items-center gap-3 bg-[#0c172d] hover:bg-[#132342] text-white pl-4 pr-5 py-3 rounded-full shadow-2xl border-2 border-[#ff551f] transition-all duration-300 transform hover:scale-105 active:scale-95" id="chat-toggle-btn" onclick="toggleChatWindow()">
 <!-- Pulse Effect Ring in Phoenix Orange -->
 <span class="absolute inset-0 rounded-full pulse-animation pointer-events-none"></span>
 <!-- Icon with dynamic badge -->
-<div class="relative w-8 h-8 rounded-full bg-[#ff551f] text-white flex items-center justify-center font-bold shadow-md">
-<i class="w-4 h-4" data-lucide="message-square-text"></i>
-<span class="absolute -top-1 -right-1 w-2.5 h-2.5 bg-emerald-500 border-2 border-[#0c172d] rounded-full"></span>
+<div class="relative w-8 h-8 rounded-full bg-white flex items-center justify-center font-bold shadow-md p-1">
+<img alt="" class="w-full h-full object-contain" src="/static/phoenix-logo.png?v=2">
+<span class="absolute -top-1 -right-1 w-2.5 h-2.5 bg-emerald-500 border-2 border-[#0c172d] rounded-full" id="launcher-beacon"></span>
 </div>
 <!-- Button Labels -->
 <div class="text-right">
-<div class="text-xs font-bold text-white flex items-center gap-1.5 font-rubik">
-<span>עוזר השירות של הפניקס</span>
-<span class="bg-[#ff551f]/20 text-[#ff7b39] text-[9px] px-1 py-0.2 rounded font-semibold">AI</span>
-</div>
-<div class="text-[10px] text-slate-300">מענה מיידי מתוך האתר הרשמי</div>
+<div class="text-xs font-bold text-white font-rubik">עוזר השירות של הפניקס</div>
 </div>
 <!-- Toggle arrow indicator -->
 <i class="w-4 h-4 text-[#ff551f] group-hover:-translate-y-0.5 transition-transform mr-1" data-lucide="chevron-up" id="launcher-chevron"></i>
@@ -484,5 +488,5 @@
 </div>
 </div>
 <!-- RAG backend wiring (UI/UX unchanged from עיצוב.txt) -->
-<script src="/static/phoenix_chat.js"></script>
+<script src="/static/phoenix_chat.js?v=20261019f"></script>
 </body></html>
