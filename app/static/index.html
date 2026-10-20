@@ -79,7 +79,21 @@
     .pulse-animation {
       animation: pulse-ring 2.6s cubic-bezier(0.4, 0, 0.6, 1) infinite;
     }
-    /* Chat widget: mutually exclusive launcher vs panel (see phoenix_chat.js data-chat) */
+    #voice-input-btn .voice-rec-indicator {
+      display: none;
+    }
+    #voice-input-btn.voice-listening .voice-mic-icon {
+      display: none;
+    }
+    #voice-input-btn.voice-listening .voice-rec-indicator {
+      display: block;
+      animation: voice-rec-pulse 1.2s ease-in-out infinite;
+    }
+    @keyframes voice-rec-pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.88; transform: scale(0.94); }
+    }
+    /* Chat widget: launcher and panel share bottom anchor; panel is absolute so close anim does not push launcher off-screen (phoenix_chat.js data-chat). */
     #widget-container {
       pointer-events: none;
     }
@@ -87,11 +101,112 @@
     #widget-container #launcher-wrap {
       pointer-events: auto;
     }
-    #widget-container[data-chat="open"] #launcher-wrap {
+    #widget-container[data-chat="closed"] {
+      width: auto;
+      height: auto;
+    }
+    #widget-container[data-chat="open"] {
+      width: 100%;
+      max-width: 425px;
+      height: 92vh;
+      max-height: 92vh;
+    }
+    #chat-window {
+      position: absolute;
+      left: 0;
+      bottom: 0;
+      z-index: 2;
+      transform-origin: bottom center;
+      opacity: 0;
+      transform: translateY(20px);
+      transition: opacity 0.35s ease-in-out, transform 0.35s ease-in-out;
+      will-change: opacity, transform;
+    }
+    #chat-window.chat-panel-open {
+      opacity: 1;
+      transform: translateY(0);
+      pointer-events: auto;
+    }
+    #chat-window.chat-panel-closed {
       display: none !important;
+    }
+    #launcher-wrap {
+      position: relative;
+      z-index: 1;
+      opacity: 1;
+      transform: translateY(0);
+      visibility: visible;
+      transition: opacity 0.35s ease-in-out, transform 0.35s ease-in-out, visibility 0.35s ease-in-out;
+      will-change: opacity, transform;
+    }
+    #launcher-wrap.launcher-suppressed {
+      display: none !important;
+      opacity: 0 !important;
+      visibility: hidden !important;
+      pointer-events: none !important;
+      transform: none !important;
+      transition: none !important;
+    }
+    #launcher-wrap.launcher-hidden {
+      opacity: 0;
+      transform: translateY(12px);
+      visibility: hidden;
+      pointer-events: none;
+    }
+    #selection-quote-btn {
+      transform: translate(-50%, -100%);
+      pointer-events: auto;
+    }
+    #input-quote-block blockquote {
+      margin: 0;
+    }
+    .chat-selectable-answer ::selection {
+      background: rgba(255, 85, 31, 0.22);
+    }
+    .chat-message-text {
+      font-size: 0.875rem;
+      font-weight: 500;
+      line-height: 1.5;
+    }
+    .chat-bot-body {
+      font-size: 0.8125rem;
+      font-weight: 500;
+      line-height: 1.5;
+    }
+    #chat-input-bar {
+      flex-shrink: 0;
+    }
+    #user-input {
+      font-size: 0.75rem;
+      line-height: 1.25rem;
+      font-weight: 400;
+      min-height: 2.5rem;
+      max-height: 2.5rem;
+      padding-top: 0.625rem;
+      padding-bottom: 0.625rem;
+    }
+    #scroll-to-bottom-btn {
+      bottom: 0.875rem;
+      z-index: 25;
+      pointer-events: none;
+    }
+    #scroll-to-bottom-btn.opacity-100 {
+      pointer-events: auto;
     }
     #widget-container[data-chat="closed"] #chat-window.chat-panel-closed {
       display: none !important;
+    }
+    @media (min-width: 640px) {
+      #widget-container[data-chat="open"] {
+        width: 425px;
+        height: 620px;
+        max-height: 82vh;
+      }
+      #widget-container[data-chat="open"] #chat-window {
+        width: 100%;
+        height: 100%;
+        max-height: 82vh;
+      }
     }
     @media (max-width: 639px) {
       #widget-container[data-chat="open"] {
@@ -99,12 +214,11 @@
         right: 0;
         bottom: 0;
         width: 100%;
+        max-width: 100%;
       }
       #widget-container[data-chat="open"] #chat-window {
         width: 100%;
-        max-width: 100%;
-        height: 92vh;
-        max-height: 92vh;
+        height: 100%;
         border-radius: 1.5rem 1.5rem 0 0;
       }
     }
@@ -377,9 +491,9 @@
 </section>
 <!-- ==================== RESPONSIVE AI CHAT WIDGET (BOTTOM-LEFT ANCHOR) ==================== -->
 <!-- Fully Responsive: Desktop floats at left-6 bottom-6; Mobile converts into seamless bottom sheet -->
-<div class="fixed left-0 sm:left-6 bottom-0 sm:bottom-6 z-50 flex flex-col items-stretch sm:items-start gap-0 sm:gap-3 w-full sm:w-auto" data-chat="closed" id="widget-container">
+<div class="fixed left-0 sm:left-6 bottom-0 sm:bottom-6 z-50 flex flex-col items-start gap-3 w-full sm:w-auto" data-chat="closed" id="widget-container">
 <!-- CHAT POPUP WINDOW (above launcher on desktop; full bottom sheet on mobile when open) -->
-<div aria-hidden="true" class="chat-panel-closed w-full sm:w-[410px] md:w-[425px] h-[92vh] sm:h-[620px] max-h-[92vh] sm:max-h-[82vh] bg-white rounded-t-3xl sm:rounded-2xl shadow-floating border border-slate-200/90 flex flex-col overflow-hidden transition-all duration-300 ease-out origin-bottom-left transform scale-90 opacity-0 pointer-events-none" id="chat-window">
+<div aria-hidden="true" class="chat-panel-closed w-full sm:w-full h-full max-h-full bg-white rounded-t-3xl sm:rounded-2xl shadow-floating border border-slate-200/90 flex flex-col overflow-hidden pointer-events-none" id="chat-window">
 <!-- 1. CHAT HEADER IN PHOENIX NAVY -->
 <div class="bg-[#0c172d] text-white p-3.5 sm:p-4 flex items-center justify-between border-b border-[#1d325c] relative shrink-0">
 <!-- Brand / Identity -->
@@ -397,8 +511,8 @@
 </div>
 <!-- Window Actions -->
 <div class="flex items-center gap-1 text-slate-300">
-<button class="p-1.5 hover:text-white hover:bg-white/10 rounded-lg transition-colors" id="btn-reset" title="התחל שיחה חדשה">
-<i class="w-4 h-4" data-lucide="rotate-ccw"></i>
+<button class="p-1.5 hover:text-white hover:bg-white/10 rounded-lg transition-colors" id="btn-reset" title="התחל שיחה חדשה" aria-label="שיחה חדשה">
+<i class="w-4 h-4" data-lucide="message-square-plus"></i>
 </button>
 <button class="p-1.5 hover:text-white hover:bg-white/10 rounded-lg transition-colors" id="btn-minimize" title="סגור / מזער">
 <i class="w-5 h-5 sm:hidden" data-lucide="x"></i>
@@ -409,17 +523,19 @@
 <!-- 2. MESSAGES CONTAINER WITH SCROLL-TO-BOTTOM CAPABILITY -->
 <div class="relative flex-1 overflow-hidden bg-slate-50 flex flex-col">
 <!-- Messages Scroll Area -->
-<div class="flex-1 overflow-y-auto p-3.5 sm:p-4 space-y-4 custom-scroll relative" id="messages-container">
+<div class="flex-1 overflow-y-auto p-3.5 sm:p-4 pb-12 space-y-4 custom-scroll relative" id="messages-container">
 <!-- Bot Message 1: Initial Greeting & Suggestions -->
 <div class="flex items-start gap-2.5" id="greeting-block">
 <div class="w-7 h-7 rounded-lg bg-[#ff551f] text-white flex items-center justify-center shrink-0 shadow-sm mt-0.5">
 <i class="w-4 h-4" data-lucide="bot"></i>
 </div>
-<div class="max-w-[85%] bg-white border border-slate-200 rounded-2xl rounded-tr-none p-3.5 shadow-bubble text-slate-800 text-sm leading-relaxed">
+<div class="max-w-[85%] bg-white border border-slate-200 rounded-2xl rounded-tr-none p-3.5 shadow-bubble text-slate-800 chat-message-text">
+<div class="chat-selectable-answer">
 <p class="font-semibold text-slate-900 mb-1">שלום! אני עוזר השירות החכם של הפניקס 👋</p>
-<p class="text-xs text-slate-600 mb-3">
+<p class="text-xs text-slate-600 mb-3 font-normal leading-[1.5]">
                 אני עונה בדיוק ובשקיפות אך ורק מתוך עמודי האתר הרשמיים של הפניקס, ומספק קישורים ישירים לטפסים ולמקורות.
               </p>
+</div>
 <!-- Quick suggestion chips -->
 <div class="text-xs font-semibold text-slate-500 mb-2">נושאים נפוצים לבירור מיידי:</div>
 <div class="flex flex-wrap gap-1.5" id="suggested-queries">
@@ -440,9 +556,13 @@
 </div>
 <!-- Bottom anchor for auto-scroll calculation -->
 <div id="scroll-bottom-anchor"></div>
+<button class="hidden absolute z-30 left-1/2 flex items-center gap-1.5 bg-[#0c172d] text-white text-xs font-bold px-3 py-1.5 rounded-full shadow-lg border border-[#ff551f]/50 hover:bg-[#132342] transition-all" id="selection-quote-btn" type="button">
+<i class="w-3.5 h-3.5 text-[#ff551f]" data-lucide="quote"></i>
+<span>הוסף לשאלה</span>
+</button>
 </div>
-<!-- 4. FLOATING "SCROLL TO BOTTOM" PILL BUTTON -->
-<div class="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 transition-all duration-300 opacity-0 pointer-events-none transform translate-y-2" id="scroll-to-bottom-btn">
+<!-- 4. FLOATING "SCROLL TO BOTTOM" PILL BUTTON (above input footer, inside message pane) -->
+<div class="absolute left-1/2 -translate-x-1/2 transition-all duration-300 opacity-0 pointer-events-none transform translate-y-2" id="scroll-to-bottom-btn">
 <button class="bg-[#0c172d]/95 hover:bg-[#0c172d] text-white text-xs font-bold px-3.5 py-1.5 rounded-full shadow-lg border border-slate-700 flex items-center gap-1.5 backdrop-blur-sm transition-all hover:scale-105" onclick="scrollToBottomSmooth()">
 <span>גלול לסוף השיחה</span>
 <i class="w-3.5 h-3.5 text-[#ff551f] animate-bounce" data-lucide="arrow-down"></i>
@@ -450,18 +570,28 @@
 </div>
 </div>
 <!-- 5. CHAT INPUT BAR -->
-<div class="p-3 bg-white border-t border-slate-200 shrink-0">
-<form class="flex items-center gap-2" id="chat-form" onsubmit="event.preventDefault(); submitUserMessage();">
-<div class="relative flex-1">
-<input autocomplete="off" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#ff551f]/30 focus:border-[#ff551f] transition-all pr-3 pl-9" id="user-input" placeholder="שאלו כל שאלה לגבי ביטוח, פנסיה או תביעה..." type="text">
-<button class="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors" title="הקלטה קולית" type="button">
-<i class="w-4 h-4" data-lucide="mic"></i>
+<div class="p-3 bg-white border-t border-slate-200 shrink-0" id="chat-input-bar">
+<div class="hidden mb-2 rounded-lg border border-orange-200/80 bg-orange-50/90 px-2.5 py-2" id="input-quote-block">
+<div class="flex items-start gap-2">
+<blockquote class="flex-1 border-r-4 border-[#ff551f] pr-2 text-xs font-medium text-slate-800 leading-[1.5]" id="input-quote-text"></blockquote>
+<button aria-label="הסר ציטוט" class="shrink-0 p-1 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-white/80" id="clear-quote-btn" type="button">
+<i class="w-4 h-4" data-lucide="x"></i>
 </button>
 </div>
-<button class="bg-[#ff551f] hover:bg-[#e6440f] text-white font-bold p-2.5 rounded-xl shadow-md transition-all active:scale-95 flex items-center justify-center shrink-0" title="שלח הודעה" type="submit">
+</div>
+<form class="flex items-center gap-2" id="chat-form" onsubmit="event.preventDefault(); submitUserMessage();">
+<div class="relative flex-1 min-h-[2.5rem]">
+<input autocomplete="off" class="w-full h-10 bg-slate-50 border border-slate-200 rounded-xl px-3.5 text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#ff551f]/30 focus:border-[#ff551f] transition-all pr-3 pl-9" id="user-input" placeholder="שאלו כל שאלה לגבי ביטוח, פנסיה או תביעה..." type="text">
+<button aria-label="הקלטת שאלה" aria-pressed="false" class="absolute left-2.5 top-1/2 -translate-y-1/2 inline-flex items-center justify-center w-7 h-7 text-slate-400 hover:text-slate-600 transition-colors disabled:opacity-40 disabled:pointer-events-none" id="voice-input-btn" title="הקלטת שאלה" type="button">
+<i class="w-4 h-4 voice-mic-icon" data-lucide="mic"></i>
+<span aria-hidden="true" class="voice-rec-indicator w-3.5 h-3.5 rounded-[2px] bg-red-600 shadow-sm ring-2 ring-red-500/40"></span>
+</button>
+</div>
+<button class="bg-[#ff551f] hover:bg-[#e6440f] text-white font-bold p-2.5 h-10 w-10 rounded-xl shadow-md transition-all active:scale-95 flex items-center justify-center shrink-0" title="שלח הודעה" type="submit">
 <i class="w-4 h-4 transform -rotate-90" data-lucide="send"></i>
 </button>
 </form>
+<p aria-live="polite" class="text-[10px] text-slate-500 min-h-[14px] mt-1 px-1 leading-snug empty:hidden" id="voice-status" role="status"></p>
 <div class="flex items-center justify-between gap-2 text-[10px] text-amber-900/75 mt-2 px-1 leading-snug">
 <span id="footer-disclaimer-line">הצ'אט מבוסס בינה מלאכותית ועשוי לטעות, אין להזין מידע אישי.</span>
 <span class="hover:underline cursor-pointer text-slate-400 shrink-0">תנאי שימוש</span>
@@ -488,5 +618,5 @@
 </div>
 </div>
 <!-- RAG backend wiring (UI/UX unchanged from עיצוב.txt) -->
-<script src="/static/phoenix_chat.js?v=20261019f"></script>
+<script src="/static/phoenix_chat.js?v=20261020e"></script>
 </body></html>

@@ -14,7 +14,7 @@ from ..indexing.embed import Embedder
 from ..indexing.retrieve import Hit, search
 from ..indexing.store import VectorIndex
 from ..logging_utils import log_query
-from .boundaries import detect
+from .boundaries import detect_with_history
 from .generate import generate_answer, rewrite_question
 from .rerank import demote_mismatched_paths, drop_weak_hits, promote_topic_hits
 from .rerank import rerank as cohere_rerank
@@ -54,6 +54,24 @@ class Answer:
             "status": self.status,
             "rewritten": self.rewritten,
         }
+
+
+def _retrieval_query(rewritten: str, history: list[dict[str, str]]) -> str:
+    """Short follow-ups: widen the search query with recent user context from the thread."""
+    if not history:
+        return rewritten
+    users = [(t.get("content") or "").strip() for t in history if t.get("role") == "user"]
+    users = [u for u in users if u]
+    if not users:
+        return rewritten
+    short = len(rewritten) < 90 or len(rewritten.split()) <= 14
+    if not short:
+        return rewritten
+    anchor = users[-1]
+    if len(anchor) < 40 and len(users) >= 2:
+        anchor = f"{users[-2]} {users[-1]}".strip()
+    combined = f"{anchor} {rewritten}".strip()
+    return combined[:900]
 
 
 def _used_chunk_ids(hits: list[Hit], urls: list[str]) -> list[str]:
@@ -123,12 +141,7 @@ class Pipeline:
         if do_rewrite and history:
             rewritten = rewrite_question(q, history, cfg) or q
 
-        bound = detect(rewritten)
-        # Short follow-ups ("תוך כמה זמן מקבלים תשובה?") have no insurance lexicon;
-        # re-check against the last user turn so they stay in the RAG path.
-        if bound.kind == "out_of_scope" and history:
-            last_user = next((t.get("content", "") for t in reversed(history) if t.get("role") == "user"), "")
-            bound = detect(f"{last_user} {rewritten}")
+        bound = detect_with_history(rewritten, history)
         if bound.kind == "out_of_scope":
             return self._finish(Answer(status="out_of_scope", text=msgs.get("out_of_scope", ""), question=q,
                                        rewritten=rewritten, boundary=bound.kind))
@@ -141,32 +154,33 @@ class Pipeline:
         top_k = int(rcfg.get("top_k", 12))
         max_cand = int((rcfg.get("rerank") or {}).get("max_candidates") or top_k)
         do_rerank = bool((rcfg.get("rerank") or {}).get("provider")) if rerank is None else rerank
+        search_q = _retrieval_query(rewritten, history)
         hits = search(
             index,
             embedder,
-            rewritten,
+            search_q,
             top_k=max_cand,
             hybrid=bool(rcfg.get("hybrid", True)),
             threshold=float(rcfg.get("relevance_threshold") or 0.0),
             max_per_url=int(rcfg.get("max_per_url") or 2),
         )
-        hits = demote_mismatched_paths(rewritten, hits)
+        hits = demote_mismatched_paths(search_q, hits)
         used_rerank = False
         keep = int((rcfg.get("rerank") or {}).get("top_n") or 5)
         if do_rerank and hits:
             rr = rcfg.get("rerank") or {}
             hits = cohere_rerank(
-                rewritten,
+                search_q,
                 hits,
                 model=rr.get("model") or "rerank-multilingual-v3.0",
                 top_n=len(hits),
             )
             used_rerank = any(h.rerank_score for h in hits)
             hits = drop_weak_hits(hits)
-            hits = demote_mismatched_paths(rewritten, hits)
-        hits = promote_topic_hits(rewritten, hits)[:keep]
+            hits = demote_mismatched_paths(search_q, hits)
+        hits = promote_topic_hits(search_q, hits)[:keep]
 
-        gen_q = rewritten
+        gen_q = search_q if search_q != rewritten else rewritten
         if bound.kind in ("no_advice", "personal_boundary"):
             gen_q = (
                 rewritten

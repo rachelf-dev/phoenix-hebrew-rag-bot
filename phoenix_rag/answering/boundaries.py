@@ -75,6 +75,10 @@ _ON_TOPIC = (
     "נזיל",
     "צנרת",
     "דוד",
+    "שרברב",
+    "שרברבים",
+    "הרחבה",
+    "הרחבות",
     "מוסך",
     "שמאי",
     "פיצוי",
@@ -126,6 +130,57 @@ class Boundary:
     message_key: str = ""
 
 
+_STANDALONE_OFF_TOPIC = (
+    "מזג האוויר",
+    "מזג אוויר",
+    "כדורגל",
+    "ספורט",
+    "מתכון",
+    "בחירות",
+)
+
+_FOLLOWUP_MARKERS = (
+    "איזה ",
+    "איזו ",
+    "ואיך",
+    "ומה ",
+    "גם ",
+    "תוך כמה",
+    "למלא",
+    "טופס",
+    "טפסים",
+    "ממשיכ",
+    "משם",
+    "על זה",
+    "בקשר ל",
+    "קודם",
+    "אמרת",
+    "פרטי",
+    "הסדר",
+)
+
+
+def _followup_needs_context(question: str) -> bool:
+    q = (question or "").strip()
+    if not q or any(p in q for p in _STANDALONE_OFF_TOPIC):
+        return False
+    words = q.split()
+    short = len(q) <= 90 or len(words) <= 14
+    if not short:
+        return False
+    if any(m in q for m in _FOLLOWUP_MARKERS):
+        return True
+    return "?" in q and len(words) <= 10
+
+
+def is_on_topic(text: str) -> bool:
+    """True when the text matches the cheap insurance / Phoenix site lexicon."""
+    q = (text or "").strip()
+    if not q:
+        return False
+    return any(p in q for p in _ON_TOPIC)
+
+
 def detect(question: str) -> Boundary:
     q = (question or "").strip()
     if not q:
@@ -137,6 +192,36 @@ def detect(question: str) -> Boundary:
         return Boundary("personal_boundary", "personal_boundary")
     if any(p in low for p in _ADVICE):
         return Boundary("no_advice", "no_advice")
-    if not any(p in low for p in _ON_TOPIC):
+    if not is_on_topic(low):
         return Boundary("out_of_scope", "out_of_scope")
     return Boundary()
+
+
+def detect_with_history(question: str, history: list[dict[str, str]] | None) -> Boundary:
+    """Apply detect; for follow-ups in an on-topic thread, prefer RAG over out_of_scope."""
+    rewritten = (question or "").strip()
+    bound = detect(rewritten)
+    if bound.kind in ("no_account_access", "personal_boundary", "no_advice"):
+        return bound
+    if bound.kind != "out_of_scope":
+        return bound
+    history = history or []
+    if not history or not _followup_needs_context(rewritten):
+        return bound
+
+    ctx = " ".join((t.get("content") or "").strip() for t in history[-6:] if (t.get("content") or "").strip())
+    if ctx:
+        widened = detect(f"{ctx} {rewritten}")
+        if widened.kind != "out_of_scope":
+            return widened
+
+    for turn in reversed(history):
+        text = (turn.get("content") or "").strip()
+        if not text:
+            continue
+        prior = detect(text)
+        if prior.kind in ("no_account_access", "personal_boundary", "no_advice"):
+            continue
+        if prior.kind != "out_of_scope" or is_on_topic(text):
+            return Boundary()
+    return bound

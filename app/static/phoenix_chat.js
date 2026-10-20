@@ -4,9 +4,16 @@
   "use strict";
 
   let conversationHistory = [];
+  let chatSessionId = 0;
+  let activeAskAbort = null;
+  let activeTypewriterCancel = null;
   let isChatOpen = false;
   let chatEverOpened = false;
   let chatCloseTimer = null;
+  let isSubmitting = false;
+  let pendingQuoteText = "";
+  let selectionQuotePayload = "";
+  const CHAT_ANIM_MS = 350;
 
   const chatWindow = document.getElementById("chat-window");
   const messagesContainer = document.getElementById("messages-container");
@@ -106,23 +113,302 @@
     messagesContainer.querySelectorAll(".chat-dynamic").forEach((el) => el.remove());
   }
 
+  function abortActiveChatWork() {
+    if (activeAskAbort) {
+      try {
+        activeAskAbort.abort();
+      } catch (_) {
+        /* ignore */
+      }
+      activeAskAbort = null;
+    }
+    if (activeTypewriterCancel) {
+      activeTypewriterCancel();
+      activeTypewriterCancel = null;
+    }
+    const ind = document.getElementById("temp-indicator");
+    if (ind) ind.remove();
+  }
+
+  let speechRecognition = null;
+  let isVoiceListening = false;
+  let voiceSessionPrefix = "";
+  let voiceSessionFinal = "";
+
+  const SpeechRecognitionCtor =
+    window.SpeechRecognition || window.webkitSpeechRecognition;
+
+  function setVoiceStatus(message, isError) {
+    const el = document.getElementById("voice-status");
+    if (!el) return;
+    el.textContent = message || "";
+    el.classList.remove("text-red-600", "text-slate-500");
+    if (!message) return;
+    el.classList.add(isError ? "text-red-600" : "text-slate-500");
+  }
+
+  function setVoiceListeningUI(listening) {
+    isVoiceListening = listening;
+    const btn = document.getElementById("voice-input-btn");
+    if (!btn) return;
+    btn.setAttribute("aria-pressed", listening ? "true" : "false");
+    btn.setAttribute(
+      "aria-label",
+      listening ? "מקליט — לחצו לעצירה" : "הקלטת שאלה"
+    );
+    btn.setAttribute("title", listening ? "מקליט… לחצו לעצירה" : "הקלטת שאלה");
+    btn.classList.toggle("voice-listening", listening);
+  }
+
+  function resetVoiceSessionState() {
+    voiceSessionPrefix = "";
+    voiceSessionFinal = "";
+  }
+
+  function clearUserInput() {
+    resetVoiceSessionState();
+    if (userInput) userInput.value = "";
+  }
+
+  function clearPendingQuote() {
+    pendingQuoteText = "";
+    const block = document.getElementById("input-quote-block");
+    const textEl = document.getElementById("input-quote-text");
+    if (textEl) textEl.textContent = "";
+    if (block) block.classList.add("hidden");
+  }
+
+  function setPendingQuote(text) {
+    const snippet = String(text || "").trim().replace(/\s+/g, " ");
+    if (!snippet) return;
+    pendingQuoteText = snippet.slice(0, 600);
+    const block = document.getElementById("input-quote-block");
+    const textEl = document.getElementById("input-quote-text");
+    if (textEl) textEl.textContent = pendingQuoteText;
+    if (block) block.classList.remove("hidden");
+    hideSelectionQuoteBtn();
+    window.getSelection()?.removeAllRanges();
+    if (userInput) {
+      userInput.focus();
+      userInput.setSelectionRange(userInput.value.length, userInput.value.length);
+    }
+  }
+
+  function buildApiQuestion(userText) {
+    const q = (userText || "").trim();
+    if (!pendingQuoteText) return q;
+    if (!q) return `בהתייחס לציטוט הבא מהתשובה: «${pendingQuoteText}»`;
+    return `בהתייחס לציטוט הבא מהתשובה: «${pendingQuoteText}»\n\n${q}`;
+  }
+
+  function formatUserBubbleContent(userText, quoteAtSend) {
+    const q = escapeHtml((userText || "").trim());
+    if (!quoteAtSend) return q;
+    const quote = escapeHtml(quoteAtSend);
+    const body = q
+      ? `<p class="mt-2 font-medium">${q}</p>`
+      : "";
+    return (
+      `<div class="border-r-4 border-orange-300/90 pr-2.5 text-xs font-medium text-white/95 leading-[1.5]">«${quote}»</div>${body}`
+    );
+  }
+
+  function hideSelectionQuoteBtn() {
+    const btn = document.getElementById("selection-quote-btn");
+    if (btn) btn.classList.add("hidden");
+    selectionQuotePayload = "";
+  }
+
+  function positionSelectionQuoteBtn(clientRect) {
+    const btn = document.getElementById("selection-quote-btn");
+    if (!btn || !messagesContainer) return;
+    const host = messagesContainer.getBoundingClientRect();
+    const top = clientRect.top - host.top - 8;
+    const left = clientRect.left - host.left + clientRect.width / 2;
+    btn.style.top = `${Math.max(8, top)}px`;
+    btn.style.left = `${Math.min(host.width - 8, Math.max(8, left))}px`;
+    btn.classList.remove("hidden");
+    lucide.createIcons();
+  }
+
+  function initSelectionQuote() {
+    const btn = document.getElementById("selection-quote-btn");
+    const clearBtn = document.getElementById("clear-quote-btn");
+    if (clearBtn) {
+      clearBtn.addEventListener("click", () => clearPendingQuote());
+    }
+    if (btn) {
+      btn.addEventListener("mousedown", (e) => e.preventDefault());
+      btn.addEventListener("click", () => {
+        if (selectionQuotePayload) setPendingQuote(selectionQuotePayload);
+      });
+    }
+    if (!messagesContainer) return;
+
+    function handleSelection() {
+      window.setTimeout(() => {
+        const sel = window.getSelection();
+        if (!sel || sel.rangeCount === 0 || sel.isCollapsed) {
+          hideSelectionQuoteBtn();
+          return;
+        }
+        const text = sel.toString().trim().replace(/\s+/g, " ");
+        if (text.length < 2) {
+          hideSelectionQuoteBtn();
+          return;
+        }
+        const node = sel.anchorNode;
+        const el = node && node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
+        if (!el || !el.closest(".chat-selectable-answer")) {
+          hideSelectionQuoteBtn();
+          return;
+        }
+        const range = sel.getRangeAt(0);
+        const rect = range.getBoundingClientRect();
+        if (!rect.width && !rect.height) {
+          hideSelectionQuoteBtn();
+          return;
+        }
+        selectionQuotePayload = text;
+        positionSelectionQuoteBtn(rect);
+      }, 12);
+    }
+
+    messagesContainer.addEventListener("mouseup", handleSelection);
+    messagesContainer.addEventListener("touchend", handleSelection);
+    document.addEventListener("mousedown", (e) => {
+      const btn = document.getElementById("selection-quote-btn");
+      if (btn && !btn.classList.contains("hidden") && !btn.contains(e.target)) {
+        window.setTimeout(() => {
+          const sel = window.getSelection();
+          if (!sel || sel.isCollapsed) hideSelectionQuoteBtn();
+        }, 0);
+      }
+    });
+    messagesContainer.addEventListener("scroll", hideSelectionQuoteBtn, { passive: true });
+  }
+
+  function stopVoiceInput() {
+    if (speechRecognition && isVoiceListening) {
+      try {
+        speechRecognition.stop();
+      } catch (_) {
+        /* already stopped */
+      }
+    }
+    setVoiceListeningUI(false);
+  }
+
+  function initVoiceInput() {
+    const btn = document.getElementById("voice-input-btn");
+    if (!btn || !userInput) return;
+
+    if (!SpeechRecognitionCtor) {
+      btn.hidden = true;
+      return;
+    }
+
+    speechRecognition = new SpeechRecognitionCtor();
+    speechRecognition.lang = "he-IL";
+    speechRecognition.interimResults = true;
+    speechRecognition.continuous = true;
+
+    speechRecognition.onresult = (event) => {
+      if (isSubmitting || !isVoiceListening) return;
+      let interim = "";
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const piece = event.results[i][0].transcript;
+        if (event.results[i].isFinal) voiceSessionFinal += piece;
+        else interim += piece;
+      }
+      userInput.value = voiceSessionPrefix + voiceSessionFinal + interim;
+    };
+
+    speechRecognition.onerror = (event) => {
+      const code = event.error || "";
+      if (code === "aborted") return;
+      if (code === "not-allowed" || code === "service-not-allowed") {
+        setVoiceStatus("אין גישה למיקרופון. אפשרו הרשאה בהגדרות הדפדפן.", true);
+      } else if (code === "no-speech") {
+        setVoiceStatus("לא זוהה דיבור. נסו שוב.", true);
+      } else if (code === "network") {
+        setVoiceStatus("שגיאת רשת בזיהוי הקול. נסו שוב.", true);
+      } else if (code) {
+        setVoiceStatus("ההקלטה לא הצליחה. נסו שוב.", true);
+      }
+      setVoiceListeningUI(false);
+    };
+
+    speechRecognition.onend = () => {
+      setVoiceListeningUI(false);
+    };
+
+    btn.addEventListener("click", () => {
+      if (isSubmitting) return;
+      if (isVoiceListening) {
+        stopVoiceInput();
+        return;
+      }
+      setVoiceStatus("");
+      const existing = userInput.value.trim();
+      voiceSessionPrefix = existing ? existing + " " : "";
+      voiceSessionFinal = "";
+      try {
+        speechRecognition.start();
+        setVoiceListeningUI(true);
+      } catch (err) {
+        const msg = String(err && err.message ? err.message : err);
+        if (/already/i.test(msg)) {
+          setVoiceListeningUI(true);
+          return;
+        }
+        setVoiceStatus("לא הצלחנו להתחיל הקלטה.", true);
+        setVoiceListeningUI(false);
+      }
+    });
+  }
+
+  function setSubmittingLocked(locked) {
+    isSubmitting = locked;
+    if (userInput) userInput.disabled = locked;
+    const submitBtn = document.querySelector("#chat-form button[type='submit']");
+    if (submitBtn) submitBtn.disabled = locked;
+    const voiceBtn = document.getElementById("voice-input-btn");
+    if (voiceBtn) voiceBtn.disabled = locked;
+    document.querySelectorAll("#suggested-queries button").forEach((btn) => {
+      btn.disabled = locked;
+    });
+    if (locked) stopVoiceInput();
+  }
+
   function typewriterInto(el, text, speed, onDone) {
     el.classList.add("cursor-blink");
     el.innerHTML = "";
     let i = 0;
+    let cancelled = false;
+    let timerId = null;
+
+    function cancel() {
+      cancelled = true;
+      if (timerId != null) clearTimeout(timerId);
+      el.classList.remove("cursor-blink");
+    }
+
     function tick() {
+      if (cancelled || !el.isConnected) return;
       if (i >= text.length) {
         el.classList.remove("cursor-blink");
-        if (onDone) onDone();
+        if (onDone && !cancelled) onDone();
         return;
       }
       const ch = text.charAt(i);
       el.innerHTML += ch === "\n" ? "<br>" : escapeHtml(ch);
       i += 1;
       messagesContainer.scrollTop = messagesContainer.scrollHeight;
-      setTimeout(tick, speed);
+      timerId = setTimeout(tick, speed);
     }
     tick();
+    return cancel;
   }
 
   function normalizeSources(sources) {
@@ -233,11 +519,12 @@
       </div>`;
   }
 
-  function appendUserBubble(text) {
+  function appendUserBubble(userText, quoteAtSend) {
     const userBubble = document.createElement("div");
     userBubble.className = "flex items-start justify-end gap-2.5 chat-dynamic";
+    const body = formatUserBubbleContent(userText, quoteAtSend);
     userBubble.innerHTML = `
-      <div class="max-w-[85%] bg-[#0c172d] text-white rounded-2xl rounded-tl-none p-3.5 shadow-sm text-sm leading-relaxed whitespace-pre-wrap">${escapeHtml(text)}</div>
+      <div class="max-w-[85%] bg-[#0c172d] text-white rounded-2xl rounded-tl-none p-3.5 shadow-sm chat-message-text">${body}</div>
       <div class="w-7 h-7 rounded-lg bg-slate-300 text-slate-700 flex items-center justify-center shrink-0 shadow-sm mt-0.5">
         <i data-lucide="user" class="w-4 h-4"></i>
       </div>`;
@@ -261,76 +548,139 @@
     lucide.createIcons();
   }
 
-  function appendBotResponse(answer, citations, hits, sources) {
+  function appendBotResponse(answer, citations, hits, sources, sessionId) {
+    if (sessionId !== chatSessionId) {
+      return Promise.resolve();
+    }
+
     const ind = document.getElementById("temp-indicator");
     if (ind) ind.remove();
 
     const sourceCards = coalesceSourceCards(citations, hits, sources);
-    const badgeHtml = buildSourceBadge(hits, sourceCards);
 
     const uniqueId = "stream-" + Date.now();
+    const badgeId = "badge-" + uniqueId;
     const wrap = document.createElement("div");
     wrap.className = "flex items-start gap-2.5 chat-dynamic";
     wrap.innerHTML = `
       <div class="w-7 h-7 rounded-lg bg-[#ff551f] text-white flex items-center justify-center shrink-0 shadow-sm mt-0.5">
         <i data-lucide="bot" class="w-4 h-4"></i>
       </div>
-      <div class="max-w-[88%] bg-white border border-slate-200 rounded-2xl rounded-tr-none p-3.5 shadow-bubble text-slate-800 text-sm leading-relaxed relative">
-        <div id="${uniqueId}" class="cursor-blink text-slate-800 text-xs leading-relaxed space-y-2 mb-2"></div>
-        ${badgeHtml}
+      <div class="max-w-[88%] bg-white border border-slate-200 rounded-2xl rounded-tr-none p-3.5 shadow-bubble text-slate-800 chat-message-text relative">
+        <div id="${uniqueId}" class="chat-selectable-answer chat-bot-body cursor-blink text-slate-800 space-y-2 mb-2"></div>
+        <div id="${badgeId}"></div>
       </div>`;
     messagesContainer.insertBefore(wrap, scrollBottomAnchor);
     lucide.createIcons();
 
     const targetDiv = document.getElementById(uniqueId);
     const typingText = plainAnswerForTyping(answer);
-    typewriterInto(targetDiv, typingText, 14, () => {
-      targetDiv.innerHTML = formatAnswerHtml(answer, hits, citations, sourceCards);
-      targetDiv.classList.remove("mb-2");
-      lucide.createIcons();
-      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    return new Promise((resolve) => {
+      if (sessionId !== chatSessionId) {
+        wrap.remove();
+        resolve();
+        return;
+      }
+      if (activeTypewriterCancel) {
+        activeTypewriterCancel();
+        activeTypewriterCancel = null;
+      }
+      activeTypewriterCancel = typewriterInto(targetDiv, typingText, 14, () => {
+        if (sessionId !== chatSessionId) {
+          wrap.remove();
+          activeTypewriterCancel = null;
+          resolve();
+          return;
+        }
+        targetDiv.innerHTML = formatAnswerHtml(answer, hits, citations, sourceCards);
+        targetDiv.classList.remove("mb-2");
+        const badgeHost = document.getElementById(badgeId);
+        if (badgeHost) {
+          badgeHost.innerHTML = buildSourceBadge(hits, sourceCards);
+        }
+        lucide.createIcons();
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        activeTypewriterCancel = null;
+        resolve();
+      });
     });
   }
 
   async function submitUserMessage() {
-    const text = userInput.value.trim();
+    if (isSubmitting) return;
+    const userText = userInput.value.trim();
+    const text = buildApiQuestion(userText);
     if (!text) return;
 
-    appendUserBubble(text);
-    userInput.value = "";
+    const quoteAtSend = pendingQuoteText;
+    const sessionAtSend = chatSessionId;
+    const controller = new AbortController();
+    activeAskAbort = controller;
+
+    stopVoiceInput();
+    clearUserInput();
+    setSubmittingLocked(true);
+
+    appendUserBubble(userText, quoteAtSend);
     scrollToBottomSmooth();
     showTypingIndicator();
     scrollToBottomSmooth();
-
-    const submitBtn = document.querySelector("#chat-form button[type='submit']");
-    if (submitBtn) submitBtn.disabled = true;
 
     try {
       const res = await fetch("/api/ask", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question: text, history: conversationHistory }),
+        signal: controller.signal,
       });
+      if (sessionAtSend !== chatSessionId) return;
       if (!res.ok) throw new Error("HTTP " + res.status);
       const data = await res.json();
+      if (sessionAtSend !== chatSessionId) return;
       const answer = data.answer || data.answer_text || "";
-      appendBotResponse(answer, data.citations || [], data.hits || [], data.sources || []);
+      await appendBotResponse(
+        answer,
+        data.citations || [],
+        data.hits || [],
+        data.sources || [],
+        sessionAtSend
+      );
+      if (sessionAtSend !== chatSessionId) return;
       conversationHistory.push({ role: "user", content: text });
       conversationHistory.push({ role: "assistant", content: answer });
+      clearPendingQuote();
     } catch (err) {
+      if (err && err.name === "AbortError") return;
+      if (sessionAtSend !== chatSessionId) return;
       const ind = document.getElementById("temp-indicator");
       if (ind) ind.remove();
-      appendBotResponse("לא הצלחתי לענות כרגע. נסו שוב בעוד רגע.", [], [], []);
+      await appendBotResponse(
+        "לא הצלחתי לענות כרגע. נסו שוב בעוד רגע.",
+        [],
+        [],
+        [],
+        sessionAtSend
+      );
       console.error(err);
     } finally {
-      if (submitBtn) submitBtn.disabled = false;
-      userInput.focus();
+      if (activeAskAbort === controller) activeAskAbort = null;
+      if (sessionAtSend === chatSessionId) {
+        setSubmittingLocked(false);
+        if (userInput) userInput.focus();
+      }
     }
   }
 
   function resetConversation() {
+    chatSessionId += 1;
+    abortActiveChatWork();
     conversationHistory = [];
     removeDynamicMessages();
+    clearUserInput();
+    clearPendingQuote();
+    hideSelectionQuoteBtn();
+    stopVoiceInput();
+    setSubmittingLocked(false);
     scrollToBottomSmooth();
   }
 
@@ -339,54 +689,88 @@
     if (beacon) beacon.remove();
   }
 
-  function applyChatState() {
-    if (!widgetContainer || !chatWindow || !launcherWrap) return;
+  function setChevron(open) {
+    const chevron = document.getElementById("launcher-chevron");
+    if (chevron) chevron.setAttribute("data-lucide", open ? "chevron-down" : "chevron-up");
+  }
 
+  function initChatClosed() {
+    if (!widgetContainer || !chatWindow || !launcherWrap) return;
+    if (chatCloseTimer) {
+      clearTimeout(chatCloseTimer);
+      chatCloseTimer = null;
+    }
+    isChatOpen = false;
+    widgetContainer.dataset.chat = "closed";
+    chatWindow.classList.add("chat-panel-closed");
+    chatWindow.classList.remove("chat-panel-open");
+    chatWindow.setAttribute("aria-hidden", "true");
+    launcherWrap.classList.remove("launcher-hidden", "launcher-suppressed");
+    launcherWrap.setAttribute("aria-hidden", "false");
+    setChevron(false);
+  }
+
+  function hideLauncherInstant() {
+    launcherWrap.classList.remove("launcher-hidden");
+    launcherWrap.classList.add("launcher-suppressed");
+    launcherWrap.setAttribute("aria-hidden", "true");
+  }
+
+  function openChatWindow() {
+    if (isChatOpen || !widgetContainer || !chatWindow || !launcherWrap) return;
+    if (!chatEverOpened) {
+      chatEverOpened = true;
+      hideLauncherBeacon();
+    }
     if (chatCloseTimer) {
       clearTimeout(chatCloseTimer);
       chatCloseTimer = null;
     }
 
-    widgetContainer.dataset.chat = isChatOpen ? "open" : "closed";
-    const chevron = document.getElementById("launcher-chevron");
-
-    if (isChatOpen) {
-      chatWindow.classList.remove("chat-panel-closed", "pointer-events-none");
-      chatWindow.setAttribute("aria-hidden", "false");
-      launcherWrap.setAttribute("aria-hidden", "true");
-      requestAnimationFrame(() => {
-        chatWindow.classList.remove("scale-90", "opacity-0");
-        chatWindow.classList.add("scale-100", "opacity-100");
-      });
-      if (chevron) chevron.setAttribute("data-lucide", "chevron-down");
-    } else {
-      chatWindow.classList.remove("scale-100", "opacity-100");
-      chatWindow.classList.add("scale-90", "opacity-0", "pointer-events-none");
-      chatWindow.setAttribute("aria-hidden", "true");
-      launcherWrap.setAttribute("aria-hidden", "false");
-      chatCloseTimer = window.setTimeout(() => {
-        if (!isChatOpen) chatWindow.classList.add("chat-panel-closed");
-        chatCloseTimer = null;
-      }, 300);
-      if (chevron) chevron.setAttribute("data-lucide", "chevron-up");
-    }
-  }
-
-  function openChatWindow() {
-    if (isChatOpen) return;
-    if (!chatEverOpened) {
-      chatEverOpened = true;
-      hideLauncherBeacon();
-    }
     isChatOpen = true;
-    applyChatState();
+    hideLauncherInstant();
+    void launcherWrap.offsetHeight;
+    widgetContainer.dataset.chat = "open";
+
+    chatWindow.classList.remove("chat-panel-closed", "chat-panel-open");
+    chatWindow.setAttribute("aria-hidden", "false");
+
+    void chatWindow.offsetHeight;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        chatWindow.classList.add("chat-panel-open");
+      });
+    });
+
+    setChevron(true);
     lucide.createIcons();
   }
 
   function closeChatWindow() {
-    if (!isChatOpen) return;
+    if (!isChatOpen || !widgetContainer || !chatWindow || !launcherWrap) return;
+    stopVoiceInput();
     isChatOpen = false;
-    applyChatState();
+
+    chatWindow.classList.remove("chat-panel-open");
+    chatWindow.setAttribute("aria-hidden", "true");
+    setChevron(false);
+
+    if (chatCloseTimer) clearTimeout(chatCloseTimer);
+    chatCloseTimer = window.setTimeout(() => {
+      if (isChatOpen) return;
+      chatWindow.classList.add("chat-panel-closed");
+      widgetContainer.dataset.chat = "closed";
+      launcherWrap.classList.remove("launcher-suppressed");
+      launcherWrap.classList.add("launcher-hidden");
+      launcherWrap.setAttribute("aria-hidden", "false");
+      void launcherWrap.offsetHeight;
+      requestAnimationFrame(() => {
+        launcherWrap.classList.remove("launcher-hidden");
+      });
+      chatCloseTimer = null;
+      lucide.createIcons();
+    }, CHAT_ANIM_MS);
+
     lucide.createIcons();
   }
 
@@ -396,9 +780,10 @@
   }
 
   window.handleSampleQuery = function (queryText) {
+    if (isSubmitting) return;
     if (!isChatOpen) openChatWindow();
     userInput.value = queryText;
-    submitUserMessage();
+    void submitUserMessage();
   };
   window.submitUserMessage = submitUserMessage;
   window.toggleChatWindow = toggleChatWindow;
@@ -406,7 +791,7 @@
 
   document.addEventListener("DOMContentLoaded", () => {
     lucide.createIcons();
-    applyChatState();
+    initChatClosed();
 
     if (mobileMenuBtn && mobileMenu) {
       mobileMenuBtn.addEventListener("click", () => mobileMenu.classList.toggle("hidden"));
@@ -426,5 +811,7 @@
 
     document.getElementById("btn-minimize").addEventListener("click", toggleChatWindow);
     document.getElementById("btn-reset").addEventListener("click", resetConversation);
+    initVoiceInput();
+    initSelectionQuote();
   });
 })();

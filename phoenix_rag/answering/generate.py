@@ -129,16 +129,45 @@ def rewrite_question(question: str, history: list[dict[str, str]], cfg: Config) 
         lines.append(f"{role}: {t.get('content', '')}")
     prompt = (
         "כתוב מחדש את שאלת המשתמש האחרונה כשאלה עצמאית בעברית, בלי להוסיף עובדות שלא נאמרו.\n"
-        "אם היא כבר עצמאית, החזר אותה כמו שהיא. החזר רק את השאלה, בלי הקדמה.\n\n"
+        "אם השאלה קצרה או מתייחסת ל'זה' / 'שם' / 'איזה טופס' — שלב מהשיחה את הנושא המרכזי "
+        "(סוג ביטוח, כיסוי, נזק, תביעה, שרברב הסדר/פרטי, דוד/צנרת וכד'), רק אם הופיע בפועל בשיחה.\n"
+        "אם היא כבר עצמאית וברורה, החזר אותה כמו שהיא. החזר רק את השאלה, בלי הקדמה.\n\n"
         "שיחה:\n"
         + "\n".join(lines)
         + f"\n\nשאלה אחרונה: {question}"
     )
     try:
-        return _generate_text(prompt, cfg, max_tokens=120, json_mode=False).strip() or question
+        rewritten = _generate_text(prompt, cfg, max_tokens=160, json_mode=False).strip() or question
+        return _heuristic_context_rewrite(question, rewritten, history)
     except Exception as exc:
         log.warning("rewrite failed: %s", str(exc)[:200])
-        return question
+        return _heuristic_context_rewrite(question, question, history)
+
+
+def _heuristic_context_rewrite(original: str, rewritten: str, history: list[dict[str, str]]) -> str:
+    """When LLM rewrite stays vague, anchor the question in recent user turns."""
+    if not history:
+        return rewritten
+    orig = (original or "").strip()
+    rew = (rewritten or "").strip() or orig
+    if len(orig) > 120:
+        return rew
+    users = [(t.get("content") or "").strip() for t in history if t.get("role") == "user"]
+    users = [u for u in users if u]
+    if not users:
+        return rew
+    anchor = users[-1]
+    if len(anchor) < 35 and len(users) >= 2:
+        anchor = f"{users[-2]} {users[-1]}".strip()
+    topic_markers = (
+        "ביטוח", "תביע", "כיסוי", "שרברב", "צנרת", "דוד", "דירה", "נזק", "נזיל", "טופס", "פוליס",
+    )
+    ctx = f"{anchor} {rew}"
+    if any(m in ctx for m in topic_markers) and len(rew) <= len(orig) + 12:
+        merged = f"{anchor} — {orig}" if orig not in anchor else orig
+        if any(m in merged for m in topic_markers):
+            return merged[:900]
+    return rew[:900]
 
 
 def _action_fallback(hits: list[Hit], urls: list[str]) -> dict[str, Any]:

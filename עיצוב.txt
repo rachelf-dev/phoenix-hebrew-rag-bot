@@ -372,8 +372,8 @@
 </div>
 <!-- Window Actions -->
 <div class="flex items-center gap-1 text-slate-300">
-<button class="p-1.5 hover:text-white hover:bg-white/10 rounded-lg transition-colors" id="btn-reset" title="התחל שיחה חדשה">
-<i class="w-4 h-4" data-lucide="rotate-ccw"></i>
+<button class="p-1.5 hover:text-white hover:bg-white/10 rounded-lg transition-colors" id="btn-reset" title="התחל שיחה חדשה" aria-label="שיחה חדשה">
+<i class="w-4 h-4" data-lucide="message-square-plus"></i>
 </button>
 <button class="p-1.5 hover:text-white hover:bg-white/10 rounded-lg transition-colors" id="btn-minimize" title="סגור / מזער">
 <i class="w-5 h-5 sm:hidden" data-lucide="x"></i>
