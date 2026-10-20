@@ -2,7 +2,8 @@
 
 Uses a deeper candidate pool than top_k and keeps at most two chunks per URL so
 self-service action pages around rank 20 still reach the reranker. Pool size
-follows retrieval.rerank.max_candidates from config.yaml."""
+follows retrieval.rerank.max_candidates from config.yaml (40 by default).
+"""
 
 from __future__ import annotations
 

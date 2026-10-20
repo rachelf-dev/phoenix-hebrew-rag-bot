@@ -77,14 +77,15 @@ vector_store:
 retrieval:
   top_k: 12
   hybrid: true               # semantic + BM25, fused with RRF, then Cohere Rerank
-  relevance_threshold: 0.0   # to be CALIBRATED on the evaluation set (section 9), not guessed
+  relevance_threshold: 0.0   # keep 0.0 so focused follow-ups are not dropped as weak
   max_per_url: 2             # URL dedupe in hybrid retrieval
   rewrite_with_history: true
+  history_window: 8          # last N chat messages for rewrite + Gemini (at least 4–6)
   rerank:
     provider: cohere         # hackathon toolkit: the Phoenix "secret weapon"
     model: rerank-multilingual-v3.0
-    top_n: 6                 # chunks sent to Gemini after rerank, weak-hit drop, and action-page promote
-    max_candidates: 32       # hybrid hits sent to Cohere (action pages can sit ~rank 20)
+    top_n: 8                 # chunks sent to Gemini after rerank, weak-hit drop, and action-page promote
+    max_candidates: 40       # hybrid hits sent to Cohere (action pages can sit ~rank 20)
 
 llm:
   provider: google           # free AI Studio key; not OpenAI (no free API)

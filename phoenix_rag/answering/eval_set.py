@@ -13,6 +13,7 @@ from ..config import Config
 from ..indexing.embed import Embedder
 from ..indexing.retrieve import search
 from ..indexing.store import VectorIndex
+from .context import retrieval_query
 from .generate import rewrite_question
 from .pipeline import Answer, Pipeline
 
@@ -117,19 +118,20 @@ def _retrieval_hit(
     rewritten = question
     if history and rcfg.get("rewrite_with_history", True):
         rewritten = rewrite_question(question, history, cfg) or question
+    search_q = retrieval_query(rewritten, history)
     top_k = int(rcfg.get("top_k", 12))
     max_cand = int((rcfg.get("rerank") or {}).get("max_candidates") or top_k)
     hits = search(
         index,
         embedder,
-        rewritten,
+        search_q,
         top_k=max_cand,
         hybrid=bool(rcfg.get("hybrid", True)),
         threshold=0.0,
         max_per_url=int(rcfg.get("max_per_url") or 2),
     )
     top = float(hits[0].score) if hits else 0.0
-    urls = [(h.display_url or h.url or "") for h in hits[:top_k]]
+    urls = [(h.display_url or h.url or "") for h in hits]
     return _url_hit(needles, urls), top
 
 

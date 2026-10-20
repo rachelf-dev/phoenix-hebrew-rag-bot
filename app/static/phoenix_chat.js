@@ -4,6 +4,7 @@
   "use strict";
 
   let conversationHistory = [];
+  const HISTORY_WINDOW = 8; // send last 4–8 turns so follow-ups keep plumber/boiler/apartment context
   let chatSessionId = 0;
   let activeAskAbort = null;
   let activeTypewriterCancel = null;
@@ -630,7 +631,10 @@
       const res = await fetch("/api/ask", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: text, history: conversationHistory }),
+        body: JSON.stringify({
+          question: text,
+          history: conversationHistory.slice(-HISTORY_WINDOW),
+        }),
         signal: controller.signal,
       });
       if (sessionAtSend !== chatSessionId) return;

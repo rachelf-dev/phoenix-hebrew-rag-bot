@@ -1,12 +1,14 @@
 """Rule-based Hebrew intent gates (personal policy, account, advice, off-topic).
 
-Fixed refusal strings live in config.yaml → messages. These run before generation so
-the model is not asked to invent a personal answer.
+Follow-ups in an on-topic thread skip out_of_scope so RAG can run. Fixed refusal
+strings live in config.yaml → messages and run before generation.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+
+from .context import is_followup, thread_has_topics
 
 # Personal-policy: we still retrieve general coverage, then append the boundary message.
 _PERSONAL = (
@@ -139,38 +141,12 @@ _STANDALONE_OFF_TOPIC = (
     "בחירות",
 )
 
-_FOLLOWUP_MARKERS = (
-    "איזה ",
-    "איזו ",
-    "ואיך",
-    "ומה ",
-    "גם ",
-    "תוך כמה",
-    "למלא",
-    "טופס",
-    "טפסים",
-    "ממשיכ",
-    "משם",
-    "על זה",
-    "בקשר ל",
-    "קודם",
-    "אמרת",
-    "פרטי",
-    "הסדר",
-)
-
 
 def _followup_needs_context(question: str) -> bool:
     q = (question or "").strip()
     if not q or any(p in q for p in _STANDALONE_OFF_TOPIC):
         return False
-    words = q.split()
-    short = len(q) <= 90 or len(words) <= 14
-    if not short:
-        return False
-    if any(m in q for m in _FOLLOWUP_MARKERS):
-        return True
-    return "?" in q and len(words) <= 10
+    return is_followup(q)
 
 
 def is_on_topic(text: str) -> bool:
@@ -197,31 +173,56 @@ def detect(question: str) -> Boundary:
     return Boundary()
 
 
-def detect_with_history(question: str, history: list[dict[str, str]] | None) -> Boundary:
-    """Apply detect; for follow-ups in an on-topic thread, prefer RAG over out_of_scope."""
-    rewritten = (question or "").strip()
-    bound = detect(rewritten)
-    if bound.kind in ("no_account_access", "personal_boundary", "no_advice"):
-        return bound
-    if bound.kind != "out_of_scope":
-        return bound
-    history = history or []
-    if not history or not _followup_needs_context(rewritten):
-        return bound
+def _hard_boundary(bound: Boundary) -> bool:
+    return bound.kind in ("no_account_access", "personal_boundary", "no_advice")
 
-    ctx = " ".join((t.get("content") or "").strip() for t in history[-6:] if (t.get("content") or "").strip())
+
+def detect_with_history(
+    original: str,
+    rewritten: str | None = None,
+    history: list[dict[str, str]] | None = None,
+) -> Boundary:
+    """Apply detect; follow-ups in an on-topic thread go to RAG instead of out_of_scope."""
+    original = (original or "").strip()
+    rewritten = (rewritten or original).strip()
+    # Keep personal/account/advice from the user's actual wording first.
+    orig_bound = detect(original)
+    if _hard_boundary(orig_bound):
+        return orig_bound
+    rew_bound = detect(rewritten) if rewritten != original else orig_bound
+    if _hard_boundary(rew_bound):
+        return rew_bound
+    if orig_bound.kind != "out_of_scope" or rew_bound.kind != "out_of_scope":
+        return Boundary()
+
+    history = history or []
+    if not history:
+        return orig_bound
+    if any(p in original for p in _STANDALONE_OFF_TOPIC):
+        return orig_bound
+
+    if thread_has_topics(history) and _followup_needs_context(original):
+        return Boundary()
+
+    ctx = " ".join(
+        (t.get("content") or "").strip()
+        for t in history[-6:]
+        if (t.get("content") or "").strip()
+    )
     if ctx:
         widened = detect(f"{ctx} {rewritten}")
-        if widened.kind != "out_of_scope":
-            return widened
+        # History may mention "הפוליסה שלי"; do not inherit that onto a later follow-up.
+        if widened.kind != "out_of_scope" and not _hard_boundary(widened):
+            return Boundary()
 
     for turn in reversed(history):
         text = (turn.get("content") or "").strip()
         if not text:
             continue
         prior = detect(text)
-        if prior.kind in ("no_account_access", "personal_boundary", "no_advice"):
+        if _hard_boundary(prior):
             continue
         if prior.kind != "out_of_scope" or is_on_topic(text):
-            return Boundary()
-    return bound
+            if _followup_needs_context(original) or len(original.split()) <= 14:
+                return Boundary()
+    return orig_bound

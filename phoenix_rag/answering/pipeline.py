@@ -1,7 +1,7 @@
-"""Full answer path: rewrite → hybrid retrieve → Cohere rerank → drop weak hits → action-page promote → Gemini.
+"""Full answer path: history rewrite → hybrid retrieve → Cohere rerank → Gemini.
 
-Returns a structured Answer (spec JSON: answer_type, answer_text, sources, used_chunk_ids)
-and appends one JSONL line per query.
+Follow-ups inherit the last 4–6 turns before search. Returns a structured Answer
+(spec JSON: answer_type, answer_text, sources, used_chunk_ids) and logs one JSONL line.
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ from ..indexing.retrieve import Hit, search
 from ..indexing.store import VectorIndex
 from ..logging_utils import log_query
 from .boundaries import detect_with_history
+from .context import history_window, history_window_size, retrieval_query
 from .generate import generate_answer, rewrite_question
 from .rerank import demote_mismatched_paths, drop_weak_hits, promote_topic_hits
 from .rerank import rerank as cohere_rerank
@@ -32,6 +33,7 @@ class Answer:
     hits: list[Hit] = field(default_factory=list)
     question: str = ""
     rewritten: str = ""
+    search_query: str = ""
     used_rerank: bool = False
     boundary: str = ""
     used_chunk_ids: list[str] = field(default_factory=list)
@@ -53,25 +55,8 @@ class Answer:
             "used_chunk_ids": self.used_chunk_ids,
             "status": self.status,
             "rewritten": self.rewritten,
+            "search_query": self.search_query,
         }
-
-
-def _retrieval_query(rewritten: str, history: list[dict[str, str]]) -> str:
-    """Short follow-ups: widen the search query with recent user context from the thread."""
-    if not history:
-        return rewritten
-    users = [(t.get("content") or "").strip() for t in history if t.get("role") == "user"]
-    users = [u for u in users if u]
-    if not users:
-        return rewritten
-    short = len(rewritten) < 90 or len(rewritten.split()) <= 14
-    if not short:
-        return rewritten
-    anchor = users[-1]
-    if len(anchor) < 40 and len(users) >= 2:
-        anchor = f"{users[-2]} {users[-1]}".strip()
-    combined = f"{anchor} {rewritten}".strip()
-    return combined[:900]
 
 
 def _used_chunk_ids(hits: list[Hit], urls: list[str]) -> list[str]:
@@ -109,6 +94,7 @@ class Pipeline:
             log_query(self.cfg, {
                 "question": ans.question,
                 "rewritten": ans.rewritten,
+                "search_query": ans.search_query,
                 "hits": [
                     {
                         "chunk_id": h.chunk_id,
@@ -135,13 +121,13 @@ class Pipeline:
         if not q:
             return self._finish(Answer(status="out_of_scope", text=msgs.get("out_of_scope", ""), question=q))
 
-        history = history or []
+        history = history_window(history or [], history_window_size(cfg))
         do_rewrite = cfg.retrieval.get("rewrite_with_history", True) if rewrite is None else rewrite
         rewritten = q
         if do_rewrite and history:
             rewritten = rewrite_question(q, history, cfg) or q
 
-        bound = detect_with_history(rewritten, history)
+        bound = detect_with_history(q, rewritten, history)
         if bound.kind == "out_of_scope":
             return self._finish(Answer(status="out_of_scope", text=msgs.get("out_of_scope", ""), question=q,
                                        rewritten=rewritten, boundary=bound.kind))
@@ -154,7 +140,7 @@ class Pipeline:
         top_k = int(rcfg.get("top_k", 12))
         max_cand = int((rcfg.get("rerank") or {}).get("max_candidates") or top_k)
         do_rerank = bool((rcfg.get("rerank") or {}).get("provider")) if rerank is None else rerank
-        search_q = _retrieval_query(rewritten, history)
+        search_q = retrieval_query(rewritten, history)
         hits = search(
             index,
             embedder,
@@ -186,7 +172,7 @@ class Pipeline:
                 rewritten
                 + "\n\nענה רק מה כתוב באתר באופן כללי, בלי המלצה אישית ובלי התייחסות לפוליסה ספציפית."
             )
-        data = generate_answer(gen_q, hits, cfg)
+        data = generate_answer(gen_q, hits, cfg, history=history)
         gen_status = data["status"]
         text = (data.get("answer") or "").strip()
         cites = list(data.get("citation_urls") or [])
@@ -219,6 +205,7 @@ class Pipeline:
             hits=hits,
             question=q,
             rewritten=rewritten,
+            search_query=search_q,
             used_rerank=used_rerank,
             boundary=bound.kind,
         ))

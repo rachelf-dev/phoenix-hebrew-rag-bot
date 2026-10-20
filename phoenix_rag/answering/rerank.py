@@ -47,7 +47,11 @@ def _url_path(hit: Hit) -> str:
 
 def _is_howto(question: str) -> bool:
     q = (question or "").lower()
-    return any(m in q for m in ("איך", "כיצד", "how do", "how to", "how can"))
+    return any(m in q for m in (
+        "איך", "כיצד", "how do", "how to", "how can",
+        "למלא", "טופס", "טפסים", "מה עושים", "מה הצעד",
+        "לאן שולח", "איפה מגיש",
+    ))
 
 
 def _is_define(question: str) -> bool:
@@ -66,7 +70,9 @@ def _title_overlap(question: str, hit: Hit, *, with_body: bool = False) -> int:
 
 
 def _is_claim_howto(question: str) -> bool:
-    return any(w in (question or "") for w in ("תביע", "נזילה", "דוד השמש"))
+    return any(w in (question or "") for w in (
+        "תביע", "נזילה", "נזיל", "דוד", "צנרת", "שרברב", "נזקי מים", "נזק למבנה",
+    ))
 
 
 def _is_action_hit(hit: Hit, question: str = "") -> bool:

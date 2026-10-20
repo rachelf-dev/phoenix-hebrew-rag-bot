@@ -75,7 +75,7 @@ form.addEventListener("submit", async (e) => {
     const r = await fetch("/api/ask", {
       method: "POST",
       headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({question: q, history})
+      body: JSON.stringify({question: q, history: history.slice(-8)})
     });
     const data = await r.json();
     let html = (data.answer || "").replace(/</g,"&lt;");

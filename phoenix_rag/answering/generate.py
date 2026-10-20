@@ -1,7 +1,7 @@
 """Gemini Flash grounded generation: answer only from retrieved chunks, else not_found.
 
-On how-to questions, prefers citing a retrieved self-service action page over FAQ/join,
-and will not refuse when that action page is already in the retrieved hits."""
+Rewrites follow-ups with the last 4–8 chat turns, then answers from retrieved
+chunks (preferring a self-service action page on how-to questions)."""
 
 from __future__ import annotations
 
@@ -14,6 +14,13 @@ from typing import Any
 
 from ..config import Config
 from ..indexing.retrieve import Hit
+from .context import (
+    format_history_lines,
+    heuristic_rewrite,
+    history_window,
+    history_window_size,
+    is_followup,
+)
 from .rerank import preferred_cite_urls
 
 log = logging.getLogger(__name__)
@@ -35,6 +42,7 @@ SYSTEM = """אתה עוזר שעונה רק מתוך קטעי תוכן ציבו�
 9. כששואלים מה כולל מוצר / מה זה / למי מיועד — עדיף לצטט את דף המוצר עצמו (סוג "product") ולא מאמר הסבר או דף בית של התחום.
 10. כש-status הוא answered חובה לציין לפחות כתובת אחת ב-citation_urls.
 11. שאלה עם שני חלקים (למשל תביעת דירה + עדכון טלפון): ענה לכל חלק רק אם יש קטע מתאים; צטט כתובת לכל חלק. ב"דירה" — לא לצטט דפי עסק/business.
+12. אם מצורפת היסטוריית שיחה — היא רק לפענוח הפניות ("זה", "שם", "הטופס", "הכיסוי", "האם זה משנה"). אסור להסתמך על עובדות מההיסטוריה שלא מופיעות בקטעים.
 החזר JSON בלבד במבנה:
 {"status":"answered"|"not_found","answer":"...","citation_urls":["https://..."]}
 כש-status הוא not_found, השאר את answer ריק (המערכת תציג למשתמש הודעה שמפנה לשירות הלקוחות)."""
@@ -119,55 +127,34 @@ def _chunks_block(hits: list[Hit]) -> str:
 
 
 def rewrite_question(question: str, history: list[dict[str, str]], cfg: Config) -> str:
-    """Turn a follow-up into a standalone Hebrew question. Returns `question` on failure / no history."""
+    """Turn a follow-up into a standalone Hebrew search question using the last 4–6 turns."""
     if not history:
         return question
-    turns = history[-6:]
-    lines = []
-    for t in turns:
-        role = "משתמש" if t.get("role") == "user" else "עוזר"
-        lines.append(f"{role}: {t.get('content', '')}")
+    turns = history_window(history, history_window_size(cfg))
+    if not turns:
+        return question
+    if not is_followup(question) and len((question or "").split()) > 16:
+        return heuristic_rewrite(question, question, turns)
+    lines = format_history_lines(turns)
     prompt = (
-        "כתוב מחדש את שאלת המשתמש האחרונה כשאלה עצמאית בעברית, בלי להוסיף עובדות שלא נאמרו.\n"
-        "אם השאלה קצרה או מתייחסת ל'זה' / 'שם' / 'איזה טופס' — שלב מהשיחה את הנושא המרכזי "
-        "(סוג ביטוח, כיסוי, נזק, תביעה, שרברב הסדר/פרטי, דוד/צנרת וכד'), רק אם הופיע בפועל בשיחה.\n"
-        "אם היא כבר עצמאית וברורה, החזר אותה כמו שהיא. החזר רק את השאלה, בלי הקדמה.\n\n"
+        "המשימה: ניסוח מחדש של שאלת המשך לצורך חיפוש באתר הפניקס.\n"
+        "כתוב שאלה עצמאית בעברית שמשלבת את ההקשר המלא מהשיחה: סוג הביטוח "
+        "(דירה / רכב / נסיעות וכו'), סוג הנזק או הפעולה, כיסוי (שרברב הסדר או שרברב פרטי), "
+        "דוד / צנרת / תביעה / טופס — רק אם הופיעו בפועל בשיחה.\n"
+        "דוגמה: אחרי שיחה על כיסוי שרברב ודוד, השאלה 'איזה טופס למלא?' צריכה להפוך ל"
+        "'איזה טופס למלא לתביעת נזקי צנרת או דוד בביטוח דירה עם כיסוי שרברב'.\n"
+        "אם השאלה כבר עצמאית וברורה — החזר אותה כמו שהיא.\n"
+        "אל תוסיף עובדות שלא נאמרו. אל תענה על השאלה. החזר רק את השאלה המשוכתבת, בלי הקדמה.\n\n"
         "שיחה:\n"
         + "\n".join(lines)
-        + f"\n\nשאלה אחרונה: {question}"
+        + f"\n\nשאלת המשך: {question}"
     )
     try:
-        rewritten = _generate_text(prompt, cfg, max_tokens=160, json_mode=False).strip() or question
-        return _heuristic_context_rewrite(question, rewritten, history)
+        rewritten = _generate_text(prompt, cfg, max_tokens=220, json_mode=False).strip() or question
+        return heuristic_rewrite(question, rewritten, turns)
     except Exception as exc:
         log.warning("rewrite failed: %s", str(exc)[:200])
-        return _heuristic_context_rewrite(question, question, history)
-
-
-def _heuristic_context_rewrite(original: str, rewritten: str, history: list[dict[str, str]]) -> str:
-    """When LLM rewrite stays vague, anchor the question in recent user turns."""
-    if not history:
-        return rewritten
-    orig = (original or "").strip()
-    rew = (rewritten or "").strip() or orig
-    if len(orig) > 120:
-        return rew
-    users = [(t.get("content") or "").strip() for t in history if t.get("role") == "user"]
-    users = [u for u in users if u]
-    if not users:
-        return rew
-    anchor = users[-1]
-    if len(anchor) < 35 and len(users) >= 2:
-        anchor = f"{users[-2]} {users[-1]}".strip()
-    topic_markers = (
-        "ביטוח", "תביע", "כיסוי", "שרברב", "צנרת", "דוד", "דירה", "נזק", "נזיל", "טופס", "פוליס",
-    )
-    ctx = f"{anchor} {rew}"
-    if any(m in ctx for m in topic_markers) and len(rew) <= len(orig) + 12:
-        merged = f"{anchor} — {orig}" if orig not in anchor else orig
-        if any(m in merged for m in topic_markers):
-            return merged[:900]
-    return rew[:900]
+        return heuristic_rewrite(question, question, turns)
 
 
 def _action_fallback(hits: list[Hit], urls: list[str]) -> dict[str, Any]:
@@ -182,13 +169,20 @@ def _action_fallback(hits: list[Hit], urls: list[str]) -> dict[str, Any]:
     return {"status": "answered", "answer": answer, "citation_urls": urls}
 
 
-def generate_answer(question: str, hits: list[Hit], cfg: Config) -> dict[str, Any]:
+def generate_answer(
+    question: str,
+    hits: list[Hit],
+    cfg: Config,
+    *,
+    history: list[dict[str, str]] | None = None,
+) -> dict[str, Any]:
     """Call Gemini; returns {status, answer, citation_urls}. Raises on missing key."""
     if not hits:
         return {"status": "not_found", "answer": "", "citation_urls": []}
     allowed = {(h.display_url or h.url) for h in hits}
     extra = preferred_cite_urls(question, hits)
-    user = f"שאלה:\n{question}\n\nקטעים מהאתר:\n{_chunks_block(hits)}"
+    hist_block = _history_block(history, history_window_size(cfg))
+    user = f"{hist_block}שאלה:\n{question}\n\nקטעים מהאתר:\n{_chunks_block(hits)}"
     if extra:
         user += (
             "\n\nדף הפעולה המתאים לשאלה כבר נמצא בקטעים. "
@@ -242,6 +236,19 @@ def generate_answer(question: str, hits: list[Hit], cfg: Config) -> dict[str, An
     if not answer:
         return {"status": "not_found", "answer": "", "citation_urls": []}
     return {"status": status, "answer": answer, "citation_urls": cites}
+
+
+def _history_block(history: list[dict[str, str]] | None, n: int) -> str:
+    """Last 4–8 turns so Gemini can resolve follow-ups without treating chat as evidence."""
+    turns = history_window(history, n)
+    if not turns:
+        return ""
+    return (
+        "היסטוריית השיחה האחרונה (רק להבנת ההפניות בשאלה; "
+        "אסור להסתמך על עובדות מכאן שלא מופיעות בקטעים):\n"
+        + "\n".join(format_history_lines(turns))
+        + "\n\n"
+    )
 
 
 def _generate_text(user: str, cfg: Config, *, max_tokens: int, json_mode: bool, system: str | None = None) -> str:

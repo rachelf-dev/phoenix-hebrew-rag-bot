@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from app.citation_labels import norm_url_key, page_title_index, sources_for_answer, title_for_citation_url
+from phoenix_rag.answering.context import history_window, history_window_size
 from phoenix_rag.answering.pipeline import Pipeline
 from phoenix_rag.config import Config
 from phoenix_rag.indexing.retrieve import Hit
@@ -106,7 +107,10 @@ def create_app(cfg: Config) -> FastAPI:
         q = (body.question or "").strip()
         if not q:
             raise HTTPException(status_code=400, detail="empty question")
-        history = [{"role": h.role, "content": h.content} for h in body.history]
+        history = history_window(
+            [{"role": h.role, "content": h.content} for h in body.history],
+            history_window_size(cfg),
+        )
         with lock:
             ans = pipe.ask(q, history=history)
         source_cards = sources_for_answer(
