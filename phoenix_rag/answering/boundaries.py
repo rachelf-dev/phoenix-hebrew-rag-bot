@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .context import is_followup, thread_has_topics
+from .context import extract_thread_slots, is_followup, thread_has_insurance_slots, thread_has_topics
 
 # Personal-policy: we still retrieve general coverage, then append the boundary message.
 _PERSONAL = (
@@ -101,10 +101,6 @@ _ON_TOPIC = (
     "פרטים אישיים",
     "עדכון פרטים",
     "מעדכנים",
-    "טופס",
-    "טפסים",
-    "הורד",
-    "הורדה",
     "pdf",
     "PDF",
     "הצהר",
@@ -142,11 +138,11 @@ _STANDALONE_OFF_TOPIC = (
 )
 
 
-def _followup_needs_context(question: str) -> bool:
+def _followup_needs_context(question: str, history: list[dict[str, str]] | None = None) -> bool:
     q = (question or "").strip()
     if not q or any(p in q for p in _STANDALONE_OFF_TOPIC):
         return False
-    return is_followup(q)
+    return is_followup(q, history)
 
 
 def is_on_topic(text: str) -> bool:
@@ -201,7 +197,9 @@ def detect_with_history(
     if any(p in original for p in _STANDALONE_OFF_TOPIC):
         return orig_bound
 
-    if thread_has_topics(history) and _followup_needs_context(original):
+    if thread_has_insurance_slots(history, original) and (
+        _followup_needs_context(original, history) or len(original.split()) <= 14
+    ):
         return Boundary()
 
     ctx = " ".join(
@@ -223,6 +221,11 @@ def detect_with_history(
         if _hard_boundary(prior):
             continue
         if prior.kind != "out_of_scope" or is_on_topic(text):
-            if _followup_needs_context(original) or len(original.split()) <= 14:
+            if _followup_needs_context(original, history) or (
+                len(original.split()) <= 14 and thread_has_insurance_slots(history, original)
+            ):
                 return Boundary()
+    if extract_thread_slots(history, rewritten).product or extract_thread_slots(history, rewritten).damages:
+        if _followup_needs_context(original, history) or len(original.split()) <= 16:
+            return Boundary()
     return orig_bound

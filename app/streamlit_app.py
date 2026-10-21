@@ -190,11 +190,12 @@ def main() -> None:
                 })
                 st.session_state.llm_history.append({"role": "user", "content": prompt})
                 st.session_state.llm_history.append({"role": "assistant", "content": ans.text})
-            except Exception as exc:
+            except Exception:
+                not_found = cfg.messages.get("not_found") or "לא הצלחתי לענות כרגע. נסו שוב."
                 st.session_state.messages.append({
                     "role": "assistant",
-                    "content": f"לא הצלחתי לענות כרגע. נסו שוב.\n\n_({exc})_",
-                    "meta": {"error": True},
+                    "content": not_found,
+                    "meta": {"error": True, "status": "not_found"},
                 })
         st.rerun()
 

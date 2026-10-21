@@ -1,0 +1,65 @@
+{
+  "summary": {
+    "tag": "fix_d10_f01",
+    "total": 2,
+    "passed": 2,
+    "retrieval_hit_rate": 1.0,
+    "citation_correctness": 1.0,
+    "correct_refusal_rate": 1.0,
+    "false_refusal_rate": 0.0,
+    "hallucination_rate": 0.0,
+    "latency_p50_ms": 12293.1,
+    "latency_p95_ms": 13233.9,
+    "suggested_rrf_threshold": 0.031498,
+    "threshold_note": "RRF threshold 0.031498 separates 0/1 weak unanswerable hits",
+    "by_category": {
+      "direct": {
+        "total": 1,
+        "passed": 1
+      },
+      "follow_up": {
+        "total": 1,
+        "passed": 1
+      }
+    }
+  },
+  "results": [
+    {
+      "id": "d10",
+      "category": "direct",
+      "hidden": false,
+      "question": "איזה ביטוח יש להפניקס לרכב טסלה?",
+      "ok": true,
+      "status": "answered",
+      "answer_type": "answered",
+      "citations": [
+        "https://www.fnx.co.il/car-insurance/charging-station-insurance/",
+        "https://www.fnx.co.il/car-insurance/electric-vehicle/",
+        "https://www.fnx.co.il/car-insurance/comprehensive/insure-my-tesla/",
+        "https://www.fnx.co.il/car-insurance/car_information/tesla-electric-vehicle-insurance/"
+      ],
+      "retrieval_hit": true,
+      "citation_ok": true,
+      "possible_hallucination": false,
+      "latency_ms": 13233.9,
+      "detail": "cited https://www.fnx.co.il/car-insurance/charging-station-insurance/",
+      "top_rrf_score": 0.032266458495966696
+    },
+    {
+      "id": "f01",
+      "category": "follow_up",
+      "hidden": false,
+      "question": "תוך כמה זמן מקבלים תשובה?",
+      "ok": true,
+      "status": "not_found",
+      "answer_type": "not_found",
+      "citations": [],
+      "retrieval_hit": true,
+      "citation_ok": true,
+      "possible_hallucination": false,
+      "latency_ms": 11352.3,
+      "detail": "status=not_found",
+      "top_rrf_score": 0.03149801587301587
+    }
+  ]
+}

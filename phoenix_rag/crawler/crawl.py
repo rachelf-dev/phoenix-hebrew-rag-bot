@@ -12,6 +12,9 @@ Design
   lastmod is known) via conditional GET (ETag / If-Modified-Since).  After fetching, the
   content hash of the visible text in <main> decides whether the page is "changed".
 * Raw HTML is stored gzip-compressed under data/raw/<sha1(url)>.html.gz.
+* Filter/interstitial HTML (NetFree, Guard, empty foreign <main>) is stored as
+  state=blocked and never indexed. Canonical and content-hash duplicates are
+  marked state=duplicate at the end of the run so they do not reach chunk/index.
 * Every decision is logged to the crawl_log table and to logs/crawl_<run>.log.
 """
 
@@ -34,6 +37,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from ..config import Config
+from .filters import filter_reason, plan_duplicates
 from .robots import Robots
 from .store import PageRow, PageStore, utcnow
 from .urls import classify, normalize_url, url_id
@@ -122,6 +126,8 @@ class Crawler:
             self.stats["removed"] = len(removed)
             if removed:
                 log.info("%d pages marked removed (no longer in sitemap/discovery)", len(removed))
+
+        self._sweep_duplicates()
 
         stats = dict(self.stats)
         stats["store_counts"] = self.store.counts()
@@ -218,6 +224,9 @@ class Crawler:
             self.stats["unchanged_304"] += 1
             self.store.log(self.run_id, url, "unchanged", "HTTP 304")
             return self._links_from_disk(existing) if self.discover else []
+        if resp.status_code in (403, 418):
+            self._block(cand, existing, resp.status_code, f"HTTP {resp.status_code} filter")
+            return []
         if resp.status_code != 200:
             self._fail(cand, existing, resp.status_code, f"HTTP {resp.status_code}")
             return []
@@ -229,13 +238,24 @@ class Crawler:
         html_text = resp.text
         main_html = self._main_html(html_text)
         soup_main = BeautifulSoup(main_html, "lxml") if main_html else None
-        content_hash = self._hash_main(soup_main)
+        main_text = self._main_text(soup_main)
+        content_hash = hashlib.sha256(main_text.encode("utf-8")).hexdigest()
         title, canonical = self._title_and_canonical(html_text)
 
         if canonical:
-            canonical = normalize_url(canonical, self.cfg) or canonical
+            canonical = normalize_url(canonical, self.cfg)
         if final_url != url:
             self.store.log(self.run_id, url, "redirected", final_url)
+
+        blocked = filter_reason(html_text, title, main_text)
+        if blocked:
+            raw_path = self._save_raw(url, html_text)
+            self._block(
+                cand, existing, resp.status_code, blocked,
+                title=title, canonical=canonical or final_url,
+                content_hash=content_hash, raw_path=str(raw_path.relative_to(self.cfg.root)),
+            )
+            return []
 
         changed = not existing or existing.content_hash != content_hash
         raw_path = self._save_raw(url, html_text)
@@ -266,6 +286,52 @@ class Crawler:
         log.info("%s %s [%s] %s", event, url, cand.section_type, title)
 
         return self._extract_links(soup_main, url, cand.priority) if (self.discover and soup_main) else []
+
+    def _block(
+        self,
+        cand: Candidate,
+        existing: PageRow | None,
+        status: int | None,
+        msg: str,
+        *,
+        title: str | None = None,
+        canonical: str | None = None,
+        content_hash: str | None = None,
+        raw_path: str | None = None,
+    ) -> None:
+        self.stats["blocked_filter"] += 1
+        self.store.log(self.run_id, cand.url, "blocked_filter", msg)
+        log.warning("blocked_filter %s: %s", cand.url, msg)
+        row = existing or PageRow(url=cand.url, url_id=url_id(cand.url))
+        row.http_status = status
+        row.error = msg
+        row.title = title or row.title
+        row.canonical_url = canonical or row.canonical_url
+        row.content_hash = content_hash or row.content_hash
+        row.raw_path = raw_path or row.raw_path
+        row.section_type = row.section_type or cand.section_type
+        row.priority = row.priority or cand.priority
+        row.discovered_from = row.discovered_from or cand.discovered_from
+        row.last_seen_run = self.run_id
+        row.state = "blocked"
+        self.store.upsert(row)
+
+    def _mark_duplicate(self, row: PageRow, event: str, detail: str) -> None:
+        self.stats[event] += 1
+        self.store.log(self.run_id, row.url, event, detail)
+        log.info("%s %s (%s)", event, row.url, detail)
+        self.store.set_state(row.url, "duplicate", detail)
+
+    def _sweep_duplicates(self) -> None:
+        """Collapse canonical aliases and identical <main> hashes among active pages."""
+        actives = list(self.store.iter_pages("active"))
+        by_url = {r.url: r for r in actives}
+        for url, event, detail in plan_duplicates(
+            [(r.url, r.canonical_url, r.content_hash) for r in actives]
+        ):
+            row = by_url.get(url)
+            if row:
+                self._mark_duplicate(row, event, detail)
 
     def _fail(self, cand: Candidate, existing: PageRow | None, status: int | None, msg: str) -> None:
         self.stats["failed"] += 1
@@ -314,12 +380,16 @@ class Crawler:
         return m.group(0) if m else ""
 
     @staticmethod
-    def _hash_main(soup_main: BeautifulSoup | None) -> str:
+    def _main_text(soup_main: BeautifulSoup | None) -> str:
         if soup_main is None:
-            return hashlib.sha256(b"").hexdigest()
+            return ""
         for t in soup_main(["script", "style", "noscript", "svg"]):
             t.decompose()
-        text = re.sub(r"\s+", " ", soup_main.get_text(" ", strip=True))
+        return re.sub(r"\s+", " ", soup_main.get_text(" ", strip=True))
+
+    @classmethod
+    def _hash_main(cls, soup_main: BeautifulSoup | None) -> str:
+        text = cls._main_text(soup_main)
         return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
     @staticmethod

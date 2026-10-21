@@ -1,14 +1,16 @@
 # FastAPI app: serves app/static/index.html (עיצוב.txt) and wires the chat widget to Phoenix RAG.
+# POST /api/ask returns JSON; POST /api/ask/stream emits SSE status + done events.
 
 from __future__ import annotations
 
+import json
 import logging
 import threading
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -102,17 +104,7 @@ def create_app(cfg: Config) -> FastAPI:
             "embedding_model": cfg.embedding.get("model", ""),
         }
 
-    @app.post("/api/ask")
-    def ask(body: AskRequest) -> dict[str, Any]:
-        q = (body.question or "").strip()
-        if not q:
-            raise HTTPException(status_code=400, detail="empty question")
-        history = history_window(
-            [{"role": h.role, "content": h.content} for h in body.history],
-            history_window_size(cfg),
-        )
-        with lock:
-            ans = pipe.ask(q, history=history)
+    def _answer_payload(ans) -> dict[str, Any]:
         source_cards = sources_for_answer(
             ans.citations, ans.hits, cfg, status=ans.status
         )
@@ -127,5 +119,65 @@ def create_app(cfg: Config) -> FastAPI:
             "hits": _hits_payload(ans.hits, cfg),
             "disclaimer": disclaimer,
         }
+
+    def _soft_fail_payload() -> dict[str, Any]:
+        text = cfg.messages.get("not_found") or "לא הצלחתי לענות כרגע. נסו שוב בעוד רגע."
+        return {
+            "status": "not_found",
+            "answer": text,
+            "answer_text": text,
+            "answer_type": "not_found",
+            "citations": [],
+            "sources": [],
+            "used_chunk_ids": [],
+            "hits": [],
+            "disclaimer": disclaimer,
+        }
+
+    @app.post("/api/ask")
+    def ask(body: AskRequest) -> dict[str, Any]:
+        q = (body.question or "").strip()
+        if not q:
+            raise HTTPException(status_code=400, detail="empty question")
+        history = history_window(
+            [{"role": h.role, "content": h.content} for h in body.history],
+            history_window_size(cfg),
+        )
+        try:
+            with lock:
+                ans = pipe.ask(q, history=history)
+            return _answer_payload(ans)
+        except Exception:
+            log.exception("ask failed; returning not_found")
+            return _soft_fail_payload()
+
+    @app.post("/api/ask/stream")
+    def ask_stream(body: AskRequest) -> StreamingResponse:
+        q = (body.question or "").strip()
+        if not q:
+            raise HTTPException(status_code=400, detail="empty question")
+        history = history_window(
+            [{"role": h.role, "content": h.content} for h in body.history],
+            history_window_size(cfg),
+        )
+
+        def events():
+            try:
+                with lock:
+                    for kind, payload in pipe.ask_events(q, history=history):
+                        if kind == "done":
+                            data = _answer_payload(payload)
+                        else:
+                            data = payload
+                        yield f"event: {kind}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+            except Exception:
+                log.exception("ask stream failed; returning not_found")
+                yield f"event: done\ndata: {json.dumps(_soft_fail_payload(), ensure_ascii=False)}\n\n"
+
+        return StreamingResponse(
+            events(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
     return app

@@ -154,8 +154,22 @@
       pointer-events: none;
     }
     #selection-quote-btn {
-      transform: translate(-50%, -100%);
+      transform: translate(-50%, calc(-100% - 6px));
       pointer-events: auto;
+      z-index: 60;
+    }
+    .source-badge-block,
+    .source-badge-host {
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    .chat-selectable-answer {
+      user-select: text;
+      -webkit-user-select: text;
+    }
+    #chat-input-wrap.has-pending-quote #user-input {
+      border-color: rgba(255, 85, 31, 0.45);
+      background-color: #fffaf7;
     }
     #input-quote-block blockquote {
       margin: 0;
@@ -493,7 +507,7 @@
 <!-- Fully Responsive: Desktop floats at left-6 bottom-6; Mobile converts into seamless bottom sheet -->
 <div class="fixed left-0 sm:left-6 bottom-0 sm:bottom-6 z-50 flex flex-col items-start gap-3 w-full sm:w-auto" data-chat="closed" id="widget-container">
 <!-- CHAT POPUP WINDOW (above launcher on desktop; full bottom sheet on mobile when open) -->
-<div aria-hidden="true" class="chat-panel-closed w-full sm:w-full h-full max-h-full bg-white rounded-t-3xl sm:rounded-2xl shadow-floating border border-slate-200/90 flex flex-col overflow-hidden pointer-events-none" id="chat-window">
+<div aria-hidden="true" class="chat-panel-closed relative w-full sm:w-full h-full max-h-full bg-white rounded-t-3xl sm:rounded-2xl shadow-floating border border-slate-200/90 flex flex-col overflow-hidden pointer-events-none" id="chat-window">
 <!-- 1. CHAT HEADER IN PHOENIX NAVY -->
 <div class="bg-[#0c172d] text-white p-3.5 sm:p-4 flex items-center justify-between border-b border-[#1d325c] relative shrink-0">
 <!-- Brand / Identity -->
@@ -529,8 +543,8 @@
 <div class="w-7 h-7 rounded-lg bg-[#ff551f] text-white flex items-center justify-center shrink-0 shadow-sm mt-0.5">
 <i class="w-4 h-4" data-lucide="bot"></i>
 </div>
-<div class="max-w-[85%] bg-white border border-slate-200 rounded-2xl rounded-tr-none p-3.5 shadow-bubble text-slate-800 chat-message-text">
-<div class="chat-selectable-answer">
+<div class="max-w-[85%] bg-white border border-slate-200 rounded-2xl rounded-tr-none p-3.5 shadow-bubble text-slate-800 chat-message-text chat-bot-bubble chat-selectable-answer">
+<div>
 <p class="font-semibold text-slate-900 mb-1">שלום! אני עוזר השירות החכם של הפניקס 👋</p>
 <p class="text-xs text-slate-600 mb-3 font-normal leading-[1.5]">
                 אני עונה בדיוק ובשקיפות אך ורק מתוך עמודי האתר הרשמיים של הפניקס, ומספק קישורים ישירים לטפסים ולמקורות.
@@ -556,10 +570,6 @@
 </div>
 <!-- Bottom anchor for auto-scroll calculation -->
 <div id="scroll-bottom-anchor"></div>
-<button class="hidden absolute z-30 left-1/2 flex items-center gap-1.5 bg-[#0c172d] text-white text-xs font-bold px-3 py-1.5 rounded-full shadow-lg border border-[#ff551f]/50 hover:bg-[#132342] transition-all" id="selection-quote-btn" type="button">
-<i class="w-3.5 h-3.5 text-[#ff551f]" data-lucide="quote"></i>
-<span>הוסף לשאלה</span>
-</button>
 </div>
 <!-- 4. FLOATING "SCROLL TO BOTTOM" PILL BUTTON (above input footer, inside message pane) -->
 <div class="absolute left-1/2 -translate-x-1/2 transition-all duration-300 opacity-0 pointer-events-none transform translate-y-2" id="scroll-to-bottom-btn">
@@ -580,7 +590,7 @@
 </div>
 </div>
 <form class="flex items-center gap-2" id="chat-form" onsubmit="event.preventDefault(); submitUserMessage();">
-<div class="relative flex-1 min-h-[2.5rem]">
+<div class="relative flex-1 min-h-[2.5rem]" id="chat-input-wrap">
 <input autocomplete="off" class="w-full h-10 bg-slate-50 border border-slate-200 rounded-xl px-3.5 text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#ff551f]/30 focus:border-[#ff551f] transition-all pr-3 pl-9" id="user-input" placeholder="שאלו כל שאלה לגבי ביטוח, פנסיה או תביעה..." type="text">
 <button aria-label="הקלטת שאלה" aria-pressed="false" class="absolute left-2.5 top-1/2 -translate-y-1/2 inline-flex items-center justify-center w-7 h-7 text-slate-400 hover:text-slate-600 transition-colors disabled:opacity-40 disabled:pointer-events-none" id="voice-input-btn" title="הקלטת שאלה" type="button">
 <i class="w-4 h-4 voice-mic-icon" data-lucide="mic"></i>
@@ -597,6 +607,10 @@
 <span class="hover:underline cursor-pointer text-slate-400 shrink-0">תנאי שימוש</span>
 </div>
 </div>
+<button aria-label="הוסף לשאלה" class="hidden absolute flex items-center gap-1.5 bg-[#0c172d] text-white text-[11px] font-bold px-3 py-1.5 rounded-full shadow-lg border border-[#ff551f]/50 hover:bg-[#132342] transition-all whitespace-nowrap pointer-events-auto" id="selection-quote-btn" title="הוסף לשאלה" type="button">
+<i class="w-3.5 h-3.5 text-[#ff551f]" data-lucide="quote"></i>
+<span>הוסף לשאלה</span>
+</button>
 </div>
 <!-- ==================== THE FLOATING LAUNCHER BUTTON AT BOTTOM-LEFT ==================== -->
 <div aria-hidden="false" class="w-full sm:w-auto px-4 sm:px-0 pb-4 sm:pb-0 flex justify-start shrink-0" id="launcher-wrap">
@@ -618,5 +632,5 @@
 </div>
 </div>
 <!-- RAG backend wiring (UI/UX unchanged from עיצוב.txt) -->
-<script src="/static/phoenix_chat.js?v=20261020e"></script>
+<script src="/static/phoenix_chat.js?v=20261020h"></script>
 </body></html>

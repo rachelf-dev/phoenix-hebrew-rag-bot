@@ -1,11 +1,12 @@
-"""Conversation window, topic anchors, and follow-up query enrichment for RAG.
+"""Conversation window, thread slots, and follow-up query enrichment for RAG.
 
 Keeps rewrite/retrieval/generation on the same 4–6 turn history so short
-follow-ups ('איזה טופס למלא?', 'האם זה משנה?') inherit the thread topic.
+follow-ups inherit apartment / plumber / boiler context as standalone search queries.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from typing import Any
 
 # Default: last 8 messages (4 Q&A pairs). Config may raise this to 12.
@@ -13,7 +14,49 @@ HISTORY_WINDOW_DEFAULT = 8
 HISTORY_WINDOW_MIN = 4
 HISTORY_WINDOW_MAX = 12
 
-# Longer phrases first so "שרברב פרטי" wins over "שרברב".
+_PRODUCT_RULES = (
+    ("ביטוח דירה", ("ביטוח דירה", "ביטוח מבנה", "ביטוח תכולה", "דירה", "מבנה", "תכולה", "דירת")),
+    ("ביטוח רכב", ("ביטוח רכב", "רכב", "מקיף", "חובה", "מוסך", "תאונה", "תאונ")),
+    ("ביטוח נסיעות", ("ביטוח נסיעות", "נסיעות", "travel")),
+    ("ביטוח בריאות", ("ביטוח בריאות", "בריאות", "health")),
+)
+
+_COVERAGE_RULES = (
+    ("שרברב פרטי", ("שרברב פרטי", "שרברבים פרטי", "בעל מקצוע פרטי")),
+    ("שרברב הסדר", ("שרברב הסדר", "שרברבים הסדר", "נותן שירות", "נותן השירות")),
+)
+
+_DAMAGE_RULES = (
+    ("נזקי מים", ("נזקי מים", "נזילה", "נזיל")),
+    ("צנרת", ("צנרת", "צינור", "pipeline")),
+    ("דוד שמש", ("דוד שמש", "דוד השמש", "דוד")),
+    ("נזק למבנה", ("נזק למבנה", "נזק לתכולה", "נזק לתכולה")),
+    ("נזק לצד שלישי", ("נזק לצד שלישי", "צד שלישי", "שכן", "השכן", "שכנ")),
+)
+
+# Phrases too broad to append to hybrid search (they pull FAQ / car / articles).
+_GENERIC_ANCHORS = frozenset({
+    "כיסוי",
+    "תביעה",
+    "תביעת",
+    "טופס",
+    "טפסים",
+    "פוליסה",
+    "דירה",
+    "רכב",
+    "נסיעות",
+    "דוד",
+    "שרברב",
+    "שרברבים",
+    "נזיל",
+    "נזילה",
+    "תכולה",
+    "מקיף",
+    "חובה",
+    "שמאי",
+    "פיצוי",
+})
+
 _TOPIC_PHRASES = (
     "שרברב הסדר",
     "שרברב פרטי",
@@ -38,20 +81,7 @@ _TOPIC_PHRASES = (
     "נזילה",
     "נזיל",
     "תכולה",
-    "כיסוי",
-    "תביעה",
-    "תביעת",
-    "טופס",
-    "טפסים",
-    "פוליסה",
-    "דירה",
-    "רכב",
-    "נסיעות",
-    "דוד",
-    "מקיף",
-    "חובה",
-    "שמאי",
-    "פיצוי",
+    "מבוטח",
 )
 
 _FOLLOWUP_MARKERS = (
@@ -64,9 +94,6 @@ _FOLLOWUP_MARKERS = (
     "ואז ",
     "גם ",
     "תוך כמה",
-    "למלא",
-    "טופס",
-    "טפסים",
     "ממשיכ",
     "משם",
     "מכאן",
@@ -78,8 +105,6 @@ _FOLLOWUP_MARKERS = (
     "ומה לגבי",
     "קודם",
     "אמרת",
-    "פרטי",
-    "הסדר",
     "הטופס",
     "הכיסוי",
     "התביעה",
@@ -110,6 +135,40 @@ _DEICTIC = (
     "אותה",
 )
 
+# Claim decision timeline — not the same as "how to file a claim" (must stay not_found if absent on site).
+_CLAIM_SLA_MARKERS = (
+    "תוך כמה זמן מקבלים תשובה",
+    "תוך כמה זמן",
+    "מתי התביעה מאושרת",
+    "מתי מאושרת התביעה",
+    "זמן טיפול בתביעה",
+    "זמן אישור התביעה",
+    "מקבלים תשובה על תביע",
+    "כמה זמן לוקח התביעה",
+    "כמה זמן עד",
+)
+
+
+def is_claim_sla_question(question: str) -> bool:
+    """True when the user asks for claim decision / response time (usually not on the public site)."""
+    q = (question or "").strip()
+    if not q:
+        return False
+    if any(p in q for p in _CLAIM_SLA_MARKERS):
+        return True
+    if "תוך כמה" in q and any(w in q for w in ("תשובה", "תביע", "מאושר", "טיפול")):
+        return True
+    return False
+
+
+@dataclass
+class ThreadSlots:
+    product: str = ""
+    coverage: str = ""
+    damages: list[str] = field(default_factory=list)
+    wants_form: bool = False
+    wants_claim: bool = False
+
 
 def history_window_size(cfg: Any | None = None) -> int:
     """Last N chat messages sent to rewrite + Gemini (clamped to 4–12)."""
@@ -127,7 +186,7 @@ def history_window(
     n: int | None = None,
     *,
     user_limit: int = 500,
-    assistant_limit: int = 360,
+    assistant_limit: int = 500,
 ) -> list[dict[str, str]]:
     """Normalize roles and keep the last `n` non-empty turns, trimmed for tokens."""
     limit = HISTORY_WINDOW_DEFAULT if n is None else n
@@ -160,8 +219,50 @@ def format_history_lines(turns: list[dict[str, str]]) -> list[str]:
     return lines
 
 
-def is_followup(question: str) -> bool:
-    """True for short / deictic turns that are not usable as a standalone search query."""
+def _conversation_blob(history: list[dict[str, str]] | None, question: str = "") -> str:
+    parts = [(t.get("content") or "") for t in (history or [])]
+    if question:
+        parts.append(question)
+    return " ".join(parts)
+
+
+def extract_thread_slots(history: list[dict[str, str]] | None, question: str = "") -> ThreadSlots:
+    """Structured insurance context from the recent thread + current question."""
+    blob = _conversation_blob(history, question)
+    slots = ThreadSlots()
+    for label, keys in _PRODUCT_RULES:
+        if any(k in blob for k in keys):
+            slots.product = label
+            break
+    for label, keys in _COVERAGE_RULES:
+        if any(k in blob for k in keys):
+            slots.coverage = label
+            break
+    for label, keys in _DAMAGE_RULES:
+        if any(k in blob for k in keys) and label not in slots.damages:
+            slots.damages.append(label)
+    if "דוד שמש" in slots.damages and "צנרת" in slots.damages:
+        pass
+    elif "דוד שמש" in slots.damages and "צנרת" in blob and "צנרת" not in slots.damages:
+        slots.damages.append("צנרת")
+    slots.wants_form = any(w in blob for w in ("טופס", "טפסים", "למלא", "הורד", "PDF", "pdf"))
+    slots.wants_claim = any(w in blob for w in ("תביע", "מגיש", "מגישים", "claim"))
+    if slots.product == "ביטוח דירה" and not slots.damages and any(w in blob for w in ("נזק", "מזיק", "נשבר")):
+        if "דוד" in blob or "שמש" in blob:
+            slots.damages.append("דוד שמש")
+    if not slots.product and slots.damages:
+        if any(d in slots.damages for d in ("דוד שמש", "צנרת", "נזקי מים", "נזק למבנה", "נזק לצד שלישי")):
+            slots.product = "ביטוח דירה"
+    return slots
+
+
+def thread_has_insurance_slots(history: list[dict[str, str]] | None, question: str = "") -> bool:
+    s = extract_thread_slots(history, question)
+    return bool(s.product or s.coverage or s.damages or s.wants_claim or s.wants_form)
+
+
+def is_followup(question: str, history: list[dict[str, str]] | None = None) -> bool:
+    """True for short / deictic turns that need thread context for search."""
     q = (question or "").strip()
     if not q:
         return False
@@ -169,22 +270,20 @@ def is_followup(question: str) -> bool:
     short = len(q) <= 90 or len(words) <= 14
     if not short:
         return False
-    low = q.lower()
-    if any(m in q or m in low for m in _FOLLOWUP_MARKERS):
-        return True
     if any(m in q for m in _DEICTIC):
+        return True
+    if any(m in q for m in _FOLLOWUP_MARKERS):
         return True
     if "?" in q and len(words) <= 12:
         return True
-    return len(words) <= 8
+    if history and len(words) <= 14 and thread_has_insurance_slots(history, q):
+        return len(words) <= 10
+    return len(words) <= 6
 
 
 def topic_anchors(history: list[dict[str, str]] | None, question: str = "") -> list[str]:
-    """Insurance/claim phrases already mentioned in the recent thread (longest first, de-duped)."""
-    parts = [(t.get("content") or "") for t in (history or [])]
-    if question:
-        parts.append(question)
-    blob = " ".join(parts)
+    """Specific insurance phrases for retrieval boost (no generic 'כיסוי' / 'תביעה')."""
+    blob = _conversation_blob(history, question)
     found: list[str] = []
     for phrase in _TOPIC_PHRASES:
         if phrase in blob and phrase not in found:
@@ -194,42 +293,135 @@ def topic_anchors(history: list[dict[str, str]] | None, question: str = "") -> l
         if any(phrase != other and phrase in other for other in found):
             continue
         compact.append(phrase)
-    related_map = (
-        (("שרברב", "שרברב פרטי", "שרברב הסדר", "צנרת"), ("נזקי מים", "ביטוח דירה", "תביעה")),
-        (("דוד", "דוד שמש", "דוד השמש"), ("ביטוח דירה",)),
-    )
-    extra: list[str] = []
-    for seeds, related in related_map:
-        if any(s in found for s in seeds):
-            extra.extend(r for r in related if r not in found and r not in extra)
-    return compact + extra
+    slots = extract_thread_slots(history, question)
+    for d in slots.damages:
+        if d not in compact:
+            compact.append(d)
+    if slots.coverage and slots.coverage not in compact:
+        compact.append(slots.coverage)
+    if slots.product and slots.product not in compact:
+        compact.append(slots.product)
+    return [p for p in compact if p not in _GENERIC_ANCHORS]
 
 
 def thread_has_topics(history: list[dict[str, str]] | None) -> bool:
-    return bool(topic_anchors(history))
+    return thread_has_insurance_slots(history)
+
+
+def _damage_phrase(slots: ThreadSlots) -> str:
+    if not slots.damages:
+        return ""
+    ordered = list(dict.fromkeys(slots.damages))
+    if len(ordered) == 1:
+        return ordered[0]
+    return " או ".join(ordered[:3])
+
+
+def _compose_from_slots(original: str, slots: ThreadSlots) -> str:
+    """Build a standalone Hebrew search question from thread slots."""
+    orig = (original or "").strip()
+    low = orig.lower()
+    product = slots.product or "ביטוח דירה"
+    damage = _damage_phrase(slots)
+    cov = f" עם {slots.coverage}" if slots.coverage else ""
+
+    if is_claim_sla_question(orig):
+        if damage:
+            return f"{orig} — זמן החלטה / מענה על תביעת {damage} ב{product}"
+        return orig
+
+    if any(p in orig for p in ("איזה טופס", "איזו טופס", "טופס למלא", "למלא")):
+        target = damage or "נזק בדירה"
+        return f"איזה טופס למלא לתביעת {target} ב{product}{cov}".strip()
+
+    if "האם זה משנה" in orig or (orig.endswith("משנה?") and "האם" in orig):
+        if slots.coverage:
+            return f"האם {slots.coverage} משנה לתביעת {damage or 'נזק בדירה'} ב{product}"
+        return f"האם סוג הכיסוי או הנזק משנה לתביעת {damage or 'נזק בדירה'} ב{product}"
+
+    if any(p in orig for p in ("ואיך ממשיכ", "משם", "מכאן", "הצעד הבא")):
+        return f"איך ממשיכים בהגשת תביעת {damage or 'נזק'} ב{product}{cov}"
+
+    if damage and not any(d in orig for d in slots.damages):
+        if "תביע" in orig or "מגיש" in orig or "מגישים" in orig:
+            return f"איך מגישים תביעת {damage} ב{product}{cov}"
+        if "מה עושים" in orig or "מה לעשות" in orig:
+            return f"מה עושים במקרה של {damage} ב{product}{cov}"
+
+    if "שכן" in low or "נזק לצד שלישי" in slots.damages:
+        if "דוד" in orig or "שמש" in orig:
+            dmg = "דוד שמש"
+        elif "צנרת" in orig:
+            dmg = "צנרת"
+        else:
+            dmg = damage or "נזק לצד שלישי"
+        return f"תביעת נזק מ{dmg} של שכן ב{product} — כיסוי ומה לעשות"
+
+    if damage and len(orig.split()) <= 14:
+        return f"{orig} — {damage} ב{product}{cov}".strip(" —")
+
+    if damage and ("תביע" in orig or "מגיש" in orig) and slots.wants_claim:
+        return f"תביעת {damage} ב{product}{cov}"
+
+    if damage and product and ("תביע" in orig or "מגיש" in orig):
+        return f"{orig} — תביעת {damage} ב{product}{cov}"
+
+    return orig
+
+
+def _rewrite_needs_slots(original: str, rewritten: str, slots: ThreadSlots) -> bool:
+    if is_claim_sla_question(original):
+        return False
+    if not slots.product and not slots.damages and not slots.coverage:
+        return False
+    orig = (original or "").strip()
+    rew = (rewritten or "").strip()
+    if is_followup(orig):
+        return True
+    if len(orig.split()) <= 14 and (slots.damages or slots.coverage):
+        return True
+    if slots.damages and not any(d in rew for d in slots.damages):
+        return True
+    if slots.product and slots.product not in rew and "ביטוח" not in rew:
+        return True
+    return len(rew) <= len(orig) + 15
 
 
 def heuristic_rewrite(original: str, rewritten: str, history: list[dict[str, str]] | None) -> str:
-    """If the LLM rewrite stays vague, pin the question to thread topics (plumber, boiler, apartment…)."""
+    """Turn vague follow-ups into standalone search questions using thread slots."""
     orig = (original or "").strip()
     rew = (rewritten or "").strip() or orig
     turns = history_window(history)
     if not turns:
         return rew[:900]
-    if not is_followup(orig) and len(orig) > 120:
+
+    slots = extract_thread_slots(turns, orig)
+    if is_claim_sla_question(orig):
+        return _compose_from_slots(orig, slots)[:900]
+
+    if not is_followup(orig, turns) and len(orig) > 120 and not slots.damages:
         return rew[:900]
 
-    topics = topic_anchors(turns, orig)
-    missing = [t for t in topics if t not in rew]
-    if not missing:
-        return rew[:900]
-    if is_followup(orig) or len(orig.split()) <= 12 or len(rew) <= len(orig) + 12:
-        return f"{rew} — {', '.join(missing[:8])}"[:900]
+    if slots.damages:
+        if not all(d in rew for d in slots.damages[:2]) or (slots.product and slots.product not in rew):
+            composed = _compose_from_slots(orig, slots)
+            if composed and composed != orig:
+                return composed[:900]
+
+    if _rewrite_needs_slots(orig, rew, slots):
+        composed = _compose_from_slots(orig, slots)
+        if composed and composed != orig:
+            return composed[:900]
+
+    if _rewrite_needs_slots(orig, rew, slots):
+        extra = topic_anchors(turns, orig)
+        if extra:
+            return f"{rew} {' '.join(extra[:6])}".strip()[:900]
     return rew[:900]
 
 
 def retrieval_query(rewritten: str, history: list[dict[str, str]] | None) -> str:
-    """Search text: standalone rewrite plus any thread topics the rewrite still omitted."""
+    """Search text: standalone rewrite plus only specific missing anchors."""
     q = (rewritten or "").strip()
     if not q:
         return q
@@ -239,4 +431,25 @@ def retrieval_query(rewritten: str, history: list[dict[str, str]] | None) -> str
     missing = [t for t in topic_anchors(turns, q) if t not in q]
     if not missing:
         return q[:900]
-    return f"{q} {' '.join(missing[:8])}".strip()[:900]
+    return f"{q} {' '.join(missing[:6])}".strip()[:900]
+
+
+def claim_path_markers(question: str, history: list[dict[str, str]] | None = None) -> list[str]:
+    """URL path substrings to promote when retrieval targets apartment/car claims."""
+    if is_claim_sla_question(question):
+        return []
+    blob = f"{question} {_conversation_blob(history)}"
+    slots = extract_thread_slots(history, question)
+    markers: list[str] = []
+    if any(x in blob for x in ("צנרת", "שרברב", "pipeline")):
+        markers.append("/claims-customer-service/claims-appartment-insurance/pipeline-damage/")
+    if any(x in blob for x in ("דוד", "שמש", "water-heater")):
+        markers.append("/claims-customer-service/claims-appartment-insurance/water-heater/")
+    if "נזק לצד שלישי" in slots.damages or any(x in blob for x in ("צד שלישי", "שכן", "השכן")):
+        markers.append("/claims-customer-service/claims-appartment-insurance/")
+    if slots.product == "ביטוח דירה" or "דירה" in blob:
+        if slots.wants_claim or "תביע" in blob:
+            markers.append("/claims-customer-service/claims-appartment-insurance/")
+    if slots.product == "ביטוח רכב" or "רכב" in blob:
+        markers.append("/claims-customer-service/claims-car-insurance/")
+    return list(dict.fromkeys(markers))

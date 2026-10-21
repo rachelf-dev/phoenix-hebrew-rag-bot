@@ -175,8 +175,10 @@
     pendingQuoteText = "";
     const block = document.getElementById("input-quote-block");
     const textEl = document.getElementById("input-quote-text");
+    const wrap = document.getElementById("chat-input-wrap");
     if (textEl) textEl.textContent = "";
     if (block) block.classList.add("hidden");
+    if (wrap) wrap.classList.remove("has-pending-quote");
   }
 
   function setPendingQuote(text) {
@@ -187,6 +189,8 @@
     const textEl = document.getElementById("input-quote-text");
     if (textEl) textEl.textContent = pendingQuoteText;
     if (block) block.classList.remove("hidden");
+    const wrap = document.getElementById("chat-input-wrap");
+    if (wrap) wrap.classList.add("has-pending-quote");
     hideSelectionQuoteBtn();
     window.getSelection()?.removeAllRanges();
     if (userInput) {
@@ -220,14 +224,44 @@
     selectionQuotePayload = "";
   }
 
+  function selectionAnchorElement(node) {
+    if (!node) return null;
+    return node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
+  }
+
+  function isQuotableSelection(sel) {
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed || !messagesContainer) return false;
+    const range = sel.getRangeAt(0);
+    const startEl = selectionAnchorElement(range.startContainer);
+    const endEl = selectionAnchorElement(range.endContainer);
+    if (!startEl || !endEl) return false;
+    if (startEl.closest(".source-badge-block") || endEl.closest(".source-badge-block")) {
+      return false;
+    }
+    const zone =
+      startEl.closest(".chat-selectable-answer") ||
+      startEl.closest(".chat-bot-bubble");
+    const zoneEnd =
+      endEl.closest(".chat-selectable-answer") ||
+      endEl.closest(".chat-bot-bubble");
+    if (!zone || !zoneEnd || zone !== zoneEnd) return false;
+    return messagesContainer.contains(zone);
+  }
+
   function positionSelectionQuoteBtn(clientRect) {
     const btn = document.getElementById("selection-quote-btn");
-    if (!btn || !messagesContainer) return;
-    const host = messagesContainer.getBoundingClientRect();
-    const top = clientRect.top - host.top - 8;
-    const left = clientRect.left - host.left + clientRect.width / 2;
-    btn.style.top = `${Math.max(8, top)}px`;
-    btn.style.left = `${Math.min(host.width - 8, Math.max(8, left))}px`;
+    if (!btn || !chatWindow) return;
+    const host = chatWindow.getBoundingClientRect();
+    const pad = 8;
+    const btnH = 36;
+    let top = clientRect.top - host.top - btnH - 6;
+    let left = clientRect.left - host.left + clientRect.width / 2;
+    top = Math.max(pad + 52, Math.min(top, host.height - pad - 120));
+    left = Math.max(pad + 40, Math.min(left, host.width - pad - 40));
+    btn.style.position = "absolute";
+    btn.style.top = `${top}px`;
+    btn.style.left = `${left}px`;
+    btn.style.transform = "translate(-50%, 0)";
     btn.classList.remove("hidden");
     lucide.createIcons();
   }
@@ -246,21 +280,23 @@
     }
     if (!messagesContainer) return;
 
+    let selectionTimer = null;
+
     function handleSelection() {
-      window.setTimeout(() => {
+      if (selectionTimer) clearTimeout(selectionTimer);
+      selectionTimer = window.setTimeout(() => {
+        selectionTimer = null;
+        if (!isChatOpen) {
+          hideSelectionQuoteBtn();
+          return;
+        }
         const sel = window.getSelection();
-        if (!sel || sel.rangeCount === 0 || sel.isCollapsed) {
+        if (!isQuotableSelection(sel)) {
           hideSelectionQuoteBtn();
           return;
         }
         const text = sel.toString().trim().replace(/\s+/g, " ");
         if (text.length < 2) {
-          hideSelectionQuoteBtn();
-          return;
-        }
-        const node = sel.anchorNode;
-        const el = node && node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
-        if (!el || !el.closest(".chat-selectable-answer")) {
           hideSelectionQuoteBtn();
           return;
         }
@@ -272,20 +308,23 @@
         }
         selectionQuotePayload = text;
         positionSelectionQuoteBtn(rect);
-      }, 12);
+      }, 20);
     }
 
     messagesContainer.addEventListener("mouseup", handleSelection);
     messagesContainer.addEventListener("touchend", handleSelection);
-    document.addEventListener("mousedown", (e) => {
-      const btn = document.getElementById("selection-quote-btn");
-      if (btn && !btn.classList.contains("hidden") && !btn.contains(e.target)) {
-        window.setTimeout(() => {
-          const sel = window.getSelection();
-          if (!sel || sel.isCollapsed) hideSelectionQuoteBtn();
-        }, 0);
-      }
-    });
+    document.addEventListener("selectionchange", handleSelection);
+    document.addEventListener(
+      "mousedown",
+      (e) => {
+        const btn = document.getElementById("selection-quote-btn");
+        if (!btn || btn.classList.contains("hidden")) return;
+        if (btn.contains(e.target)) return;
+        if (messagesContainer && messagesContainer.contains(e.target)) return;
+        hideSelectionQuoteBtn();
+      },
+      true
+    );
     messagesContainer.addEventListener("scroll", hideSelectionQuoteBtn, { passive: true });
   }
 
@@ -382,34 +421,80 @@
     if (locked) stopVoiceInput();
   }
 
-  function typewriterInto(el, text, speed, onDone) {
-    el.classList.add("cursor-blink");
-    el.innerHTML = "";
-    let i = 0;
-    let cancelled = false;
-    let timerId = null;
+  function setTypingStage(stage) {
+    const el = document.getElementById("temp-indicator-status");
+    if (!el) return;
+    el.textContent = stage === "generating" ? "מכין תשובה…" : "מחפש את המידע בשבילך...";
+  }
 
-    function cancel() {
-      cancelled = true;
-      if (timerId != null) clearTimeout(timerId);
-      el.classList.remove("cursor-blink");
-    }
-
-    function tick() {
-      if (cancelled || !el.isConnected) return;
-      if (i >= text.length) {
-        el.classList.remove("cursor-blink");
-        if (onDone && !cancelled) onDone();
-        return;
+  function createSseParser(onEvent) {
+    let eventName = "message";
+    const dataLines = [];
+    return function push(chunk, flushTail) {
+      const parts = chunk.split("\n");
+      const rest = flushTail ? [] : [parts.pop()];
+      for (const line of parts) {
+        if (line.startsWith("event:")) {
+          eventName = line.slice(6).trim();
+        } else if (line.startsWith("data:")) {
+          dataLines.push(line.slice(5).trimStart());
+        } else if (line === "") {
+          if (dataLines.length) {
+            const raw = dataLines.splice(0, dataLines.length).join("\n");
+            let parsed = raw;
+            try {
+              parsed = JSON.parse(raw);
+            } catch (_) {
+              /* keep raw */
+            }
+            onEvent(eventName, parsed);
+          }
+          eventName = "message";
+        }
       }
-      const ch = text.charAt(i);
-      el.innerHTML += ch === "\n" ? "<br>" : escapeHtml(ch);
-      i += 1;
-      messagesContainer.scrollTop = messagesContainer.scrollHeight;
-      timerId = setTimeout(tick, speed);
+      return rest.join("\n");
+    };
+  }
+
+  async function askViaStream(text, history, signal, onStatus) {
+    const res = await fetch("/api/ask/stream", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "text/event-stream",
+      },
+      body: JSON.stringify({ question: text, history }),
+      signal,
+    });
+    if (!res.ok || !res.body) throw new Error("HTTP " + res.status);
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    let donePayload = null;
+    const push = createSseParser((name, data) => {
+      if (name === "status" && onStatus) onStatus((data && data.stage) || "");
+      if (name === "done") donePayload = data;
+    });
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      buf = push(buf, false);
     }
-    tick();
-    return cancel;
+    if (buf) push(buf + "\n\n", true);
+    if (!donePayload) throw new Error("empty stream");
+    return donePayload;
+  }
+
+  async function askViaJson(text, history, signal) {
+    const res = await fetch("/api/ask", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question: text, history }),
+      signal,
+    });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    return res.json();
   }
 
   function normalizeSources(sources) {
@@ -436,9 +521,15 @@
   }
 
   /** Merge API source cards with citations + hits (legacy API / missing titles). */
-  function coalesceSourceCards(citations, hits, sources) {
+  function coalesceSourceCards(citations, hits, sources, answerStatus) {
     let cards = normalizeSources(sources);
     if (cards.length) return cards;
+    const refused =
+      answerStatus &&
+      answerStatus !== "answered" &&
+      answerStatus !== "personal_boundary" &&
+      answerStatus !== "no_advice";
+    if (refused) return [];
 
     let citeList = Array.isArray(citations) ? citations.slice() : [];
     if (!citeList.length && sources && sources.length && typeof sources[0] === "string") {
@@ -543,13 +634,13 @@
       </div>
       <div class="bg-white border border-slate-200 rounded-2xl rounded-tr-none px-4 py-3 shadow-bubble flex items-center gap-1.5 text-xs text-slate-500">
         <span class="w-2 h-2 rounded-full bg-[#ff551f] animate-pulse"></span>
-        <span>מחפש את המידע בשבילך...</span>
+        <span id="temp-indicator-status">מחפש את המידע בשבילך...</span>
       </div>`;
     messagesContainer.insertBefore(typingIndicator, scrollBottomAnchor);
     lucide.createIcons();
   }
 
-  function appendBotResponse(answer, citations, hits, sources, sessionId) {
+  function appendBotResponse(answer, citations, hits, sources, sessionId, answerStatus) {
     if (sessionId !== chatSessionId) {
       return Promise.resolve();
     }
@@ -557,7 +648,7 @@
     const ind = document.getElementById("temp-indicator");
     if (ind) ind.remove();
 
-    const sourceCards = coalesceSourceCards(citations, hits, sources);
+    const sourceCards = coalesceSourceCards(citations, hits, sources, answerStatus);
 
     const uniqueId = "stream-" + Date.now();
     const badgeId = "badge-" + uniqueId;
@@ -567,44 +658,22 @@
       <div class="w-7 h-7 rounded-lg bg-[#ff551f] text-white flex items-center justify-center shrink-0 shadow-sm mt-0.5">
         <i data-lucide="bot" class="w-4 h-4"></i>
       </div>
-      <div class="max-w-[88%] bg-white border border-slate-200 rounded-2xl rounded-tr-none p-3.5 shadow-bubble text-slate-800 chat-message-text relative">
-        <div id="${uniqueId}" class="chat-selectable-answer chat-bot-body cursor-blink text-slate-800 space-y-2 mb-2"></div>
-        <div id="${badgeId}"></div>
+      <div class="max-w-[88%] bg-white border border-slate-200 rounded-2xl rounded-tr-none p-3.5 shadow-bubble text-slate-800 chat-message-text relative chat-bot-bubble chat-selectable-answer">
+        <div id="${uniqueId}" class="chat-bot-body text-slate-800 space-y-2"></div>
+        <div class="source-badge-host" id="${badgeId}"></div>
       </div>`;
     messagesContainer.insertBefore(wrap, scrollBottomAnchor);
-    lucide.createIcons();
 
     const targetDiv = document.getElementById(uniqueId);
-    const typingText = plainAnswerForTyping(answer);
-    return new Promise((resolve) => {
-      if (sessionId !== chatSessionId) {
-        wrap.remove();
-        resolve();
-        return;
-      }
-      if (activeTypewriterCancel) {
-        activeTypewriterCancel();
-        activeTypewriterCancel = null;
-      }
-      activeTypewriterCancel = typewriterInto(targetDiv, typingText, 14, () => {
-        if (sessionId !== chatSessionId) {
-          wrap.remove();
-          activeTypewriterCancel = null;
-          resolve();
-          return;
-        }
-        targetDiv.innerHTML = formatAnswerHtml(answer, hits, citations, sourceCards);
-        targetDiv.classList.remove("mb-2");
-        const badgeHost = document.getElementById(badgeId);
-        if (badgeHost) {
-          badgeHost.innerHTML = buildSourceBadge(hits, sourceCards);
-        }
-        lucide.createIcons();
-        messagesContainer.scrollTop = messagesContainer.scrollHeight;
-        activeTypewriterCancel = null;
-        resolve();
-      });
-    });
+    if (!targetDiv) return Promise.resolve();
+    targetDiv.innerHTML = formatAnswerHtml(answer, hits, citations, sourceCards);
+    const badgeHost = document.getElementById(badgeId);
+    if (badgeHost) {
+      badgeHost.innerHTML = buildSourceBadge(hits, sourceCards);
+    }
+    lucide.createIcons();
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    return Promise.resolve();
   }
 
   async function submitUserMessage() {
@@ -628,18 +697,14 @@
     scrollToBottomSmooth();
 
     try {
-      const res = await fetch("/api/ask", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          question: text,
-          history: conversationHistory.slice(-HISTORY_WINDOW),
-        }),
-        signal: controller.signal,
-      });
-      if (sessionAtSend !== chatSessionId) return;
-      if (!res.ok) throw new Error("HTTP " + res.status);
-      const data = await res.json();
+      const history = conversationHistory.slice(-HISTORY_WINDOW);
+      let data;
+      try {
+        data = await askViaStream(text, history, controller.signal, setTypingStage);
+      } catch (streamErr) {
+        if (streamErr && streamErr.name === "AbortError") throw streamErr;
+        data = await askViaJson(text, history, controller.signal);
+      }
       if (sessionAtSend !== chatSessionId) return;
       const answer = data.answer || data.answer_text || "";
       await appendBotResponse(
@@ -647,7 +712,8 @@
         data.citations || [],
         data.hits || [],
         data.sources || [],
-        sessionAtSend
+        sessionAtSend,
+        data.status || data.answer_type || ""
       );
       if (sessionAtSend !== chatSessionId) return;
       conversationHistory.push({ role: "user", content: text });
@@ -663,7 +729,8 @@
         [],
         [],
         [],
-        sessionAtSend
+        sessionAtSend,
+        "error"
       );
       console.error(err);
     } finally {

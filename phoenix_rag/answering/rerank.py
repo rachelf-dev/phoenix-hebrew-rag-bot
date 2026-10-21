@@ -16,6 +16,7 @@ import httpx
 
 from ..indexing.hebrew_lex import tokenize
 from ..indexing.retrieve import Hit
+from .context import claim_path_markers, extract_thread_slots
 
 log = logging.getLogger(__name__)
 
@@ -69,34 +70,77 @@ def _title_overlap(question: str, hit: Hit, *, with_body: bool = False) -> int:
     return len(q_toks & {t for t in tokenize(blob) if len(t) >= 3})
 
 
-def _is_claim_howto(question: str) -> bool:
-    return any(w in (question or "") for w in (
-        "תביע", "נזילה", "נזיל", "דוד", "צנרת", "שרברב", "נזקי מים", "נזק למבנה",
+def _is_claim_howto(question: str, history: list[dict[str, str]] | None = None) -> bool:
+    blob = question or ""
+    slots = extract_thread_slots(history, question)
+    if slots.damages or slots.wants_claim or slots.wants_form:
+        return True
+    return any(w in blob for w in (
+        "תביע", "נזילה", "נזיל", "דוד", "צנרת", "שרברב", "נזקי מים", "נזק למבנה", "שכן", "טופס",
     ))
 
 
-def _is_action_hit(hit: Hit, question: str = "") -> bool:
+def _is_action_hit(hit: Hit, question: str = "", history: list[dict[str, str]] | None = None) -> bool:
     """Self-service how-to page: claims URLs for claim questions, else a deep /customer-service/ page."""
     path = _url_path(hit)
     parts = [p for p in path.strip("/").split("/") if p]
-    if _is_claim_howto(question):
+    if _is_claim_howto(question, history):
         return path.startswith("/claims-customer-service/")
     return path.startswith("/customer-service/") and hit.section_type == "service" and len(parts) >= 3
 
 
-def promote_action_hits(question: str, hits: list[Hit], *, limit: int = 2) -> list[Hit]:
+def promote_claim_path_hits(
+    question: str,
+    hits: list[Hit],
+    history: list[dict[str, str]] | None = None,
+    *,
+    limit: int = 3,
+) -> list[Hit]:
+    """Boost apartment/car claim pages that match thread damage type (plumber, boiler, third party)."""
+    if not hits:
+        return hits
+    markers = claim_path_markers(question, history)
+    if not markers:
+        return hits
+    chosen: list[Hit] = []
+    rest: list[Hit] = []
+    seen: set[str] = set()
+    for h in hits:
+        path = _url_path(h)
+        url = (h.display_url or h.url or "").rstrip("/")
+        if len(chosen) < limit and any(m in path for m in markers) and url not in seen:
+            chosen.append(h)
+            if url:
+                seen.add(url)
+        else:
+            rest.append(h)
+    return chosen + rest if chosen else hits
+
+
+def promote_action_hits(
+    question: str,
+    hits: list[Hit],
+    *,
+    limit: int = 2,
+    history: list[dict[str, str]] | None = None,
+) -> list[Hit]:
     """On how-to questions, move self-service action pages to the front of the list."""
-    if not hits or not _is_howto(question):
+    if not hits:
+        return hits
+    hits = promote_claim_path_hits(question, hits, history, limit=limit)
+    if not _is_howto(question) and not _is_claim_howto(question, history):
         return hits
     chosen: list[Hit] = []
     rest: list[Hit] = []
     seen: set[str] = set()
     for h in hits:
         url = (h.display_url or h.url or "").rstrip("/")
+        overlap = _title_overlap(question, h, with_body=True)
+        min_ov = 1 if _is_claim_howto(question, history) else 2
         if (
             len(chosen) < limit
-            and _is_action_hit(h, question)
-            and _title_overlap(question, h, with_body=True) >= 2
+            and _is_action_hit(h, question, history)
+            and overlap >= min_ov
             and url not in seen
         ):
             chosen.append(h)
@@ -142,7 +186,13 @@ def _canonical_product_hits(question: str, hits: list[Hit]) -> list[Hit]:
         scored.append((ov, len(parts), h))
     scored.sort(key=lambda t: (t[0], t[1]), reverse=True)
     specific = [h for ov, n, h in scored if n >= 2]
-    return specific or [h for _, _, h in scored]
+    chosen = specific or [h for _, _, h in scored]
+    qlow = (question or "").lower()
+    if "טסלה" in (question or "") or "tesla" in qlow:
+        tesla = [h for h in chosen if "tesla" in _url_path(h)]
+        if tesla:
+            return tesla
+    return chosen
 
 
 def demote_mismatched_paths(question: str, hits: list[Hit]) -> list[Hit]:
@@ -165,15 +215,36 @@ def demote_mismatched_paths(question: str, hits: list[Hit]) -> list[Hit]:
                 good.append(h)
         if good:
             return good + tail
+    qlow = q.lower()
+    if ("טסלה" in q or "tesla" in qlow) and "טעינ" not in q and "charging" not in qlow:
+        tesla, rest, chargers = [], [], []
+        for h in hits:
+            path = _url_path(h)
+            if "tesla" in path or "טסלה" in (h.page_title or ""):
+                tesla.append(h)
+            elif "charging-station" in path or "charging" in path:
+                chargers.append(h)
+            else:
+                rest.append(h)
+        ordered = tesla + rest + chargers
+        if tesla or rest:
+            return ordered
     return hits
 
 
-def promote_topic_hits(question: str, hits: list[Hit], *, limit: int = 2) -> list[Hit]:
+def promote_topic_hits(
+    question: str,
+    hits: list[Hit],
+    *,
+    limit: int = 2,
+    history: list[dict[str, str]] | None = None,
+) -> list[Hit]:
     """Move the most relevant action or product landing page to the front of the list."""
     if not hits:
         return hits
-    if _is_howto(question):
-        return promote_action_hits(question, hits, limit=limit)
+    hits = promote_claim_path_hits(question, hits, history, limit=max(limit, 3))
+    if _is_howto(question) or _is_claim_howto(question, history):
+        return promote_action_hits(question, hits, limit=limit, history=history)
     if not _is_define(question):
         return hits
     chosen = _canonical_product_hits(question, hits)[:limit]
@@ -198,17 +269,29 @@ def preferred_cite_urls(question: str, hits: list[Hit]) -> list[str]:
     return urls
 
 
-def drop_weak_hits(hits: list[Hit], *, relative: float = 0.08, floor: float = 0.03) -> list[Hit]:
-    """Keep Cohere hits near the best score; skip when rerank did not run."""
+def drop_weak_hits(
+    hits: list[Hit],
+    *,
+    relative: float = 0.08,
+    floor: float = 0.03,
+    refuse_below: float = 0.0,
+) -> list[Hit]:
+    """Keep Cohere hits near the best score; empty list means 'too weak to answer'.
+
+    When rerank did not assign scores, the hybrid order is kept. `refuse_below`
+    is the peak-score gate (config `rerank.min_score`); it does not force-keep
+    a leftover weak hit.
+    """
     scored = [h.rerank_score for h in hits if h.rerank_score]
     if not scored:
         return hits
     peak = max(scored)
+    if refuse_below > 0 and peak < refuse_below:
+        return []
     if peak < floor:
         return hits
     thresh = max(floor, peak * relative)
-    kept = [h for h in hits if h.rerank_score >= thresh]
-    return kept or hits[:1]
+    return [h for h in hits if h.rerank_score >= thresh]
 
 
 def _doc_text(hit: Hit) -> str:

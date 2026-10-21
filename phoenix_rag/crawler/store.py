@@ -29,20 +29,22 @@ CREATE TABLE IF NOT EXISTS pages (
     section_type    TEXT,
     priority        INTEGER,
     discovered_from TEXT,            -- 'sitemap' or the URL where the link was found
-    state           TEXT NOT NULL,   -- active | removed | failed | blocked | skipped
+    state           TEXT NOT NULL,   -- active | removed | failed | blocked | skipped | duplicate
     error           TEXT,
     last_seen_run   TEXT,            -- run id in which the URL was last listed/discovered
     changed_in_run  TEXT             -- run id in which the content hash last changed
 );
 CREATE INDEX IF NOT EXISTS idx_pages_state ON pages(state);
 CREATE INDEX IF NOT EXISTS idx_pages_section ON pages(section_type);
+CREATE INDEX IF NOT EXISTS idx_pages_canonical ON pages(canonical_url);
+CREATE INDEX IF NOT EXISTS idx_pages_hash ON pages(content_hash);
 
 CREATE TABLE IF NOT EXISTS crawl_log (
     id        INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id    TEXT NOT NULL,
     ts        TEXT NOT NULL,
     url       TEXT NOT NULL,
-    event     TEXT NOT NULL,         -- fetched | unchanged | skipped | blocked | failed | removed | excluded
+    event     TEXT NOT NULL,         -- fetched | unchanged | skipped | blocked | blocked_filter | failed | removed | excluded | duplicate_canonical | duplicate_hash
     detail    TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_log_run ON crawl_log(run_id, event);
@@ -143,6 +145,10 @@ class PageStore:
             self.log(run_id, url, "removed", "not present in sitemap/discovery of a full run")
         self.conn.commit()
         return removed
+
+    def set_state(self, url: str, state: str, error: str | None = None) -> None:
+        self.conn.execute("UPDATE pages SET state=?, error=? WHERE url=?", (state, error, url))
+        self.conn.commit()
 
     def counts(self) -> dict[str, int]:
         return {

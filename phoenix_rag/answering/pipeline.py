@@ -1,12 +1,15 @@
-"""Full answer path: history rewrite → hybrid retrieve → Cohere rerank → Gemini.
+"""Full answer path: sanitize → rewrite → hybrid retrieve → Cohere rerank → Gemini.
 
-Follow-ups inherit the last 4–6 turns before search. Returns a structured Answer
-(spec JSON: answer_type, answer_text, sources, used_chunk_ids) and logs one JSONL line.
+Follow-ups inherit the last 4–6 turns before search. Weak rerank peaks skip
+generation and return the *5040 not_found message. Gemini 429 exhaustion is a
+soft fail (same message), not HTTP 500. Returns a structured Answer and logs
+one JSONL line.
 """
 
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 
 from ..config import Config
@@ -14,11 +17,13 @@ from ..indexing.embed import Embedder
 from ..indexing.retrieve import Hit, search
 from ..indexing.store import VectorIndex
 from ..logging_utils import log_query
-from .boundaries import detect_with_history
+from .boundaries import Boundary, detect_with_history
 from .context import history_window, history_window_size, retrieval_query
-from .generate import generate_answer, rewrite_question
+from .context import is_claim_sla_question
+from .generate import generate_answer, grounded_action_fallback, rewrite_question
 from .rerank import demote_mismatched_paths, drop_weak_hits, promote_topic_hits
 from .rerank import rerank as cohere_rerank
+from .sanitize import looks_like_injection, sanitize_history, sanitize_question
 
 log = logging.getLogger(__name__)
 
@@ -73,6 +78,20 @@ def _used_chunk_ids(hits: list[Hit], urls: list[str]) -> list[str]:
     return ids
 
 
+@dataclass
+class _PreparedAsk:
+    """Retrieve/rerank result, or an early canned Answer that skips Gemini."""
+
+    question: str
+    rewritten: str = ""
+    search_q: str = ""
+    history: list[dict[str, str]] = field(default_factory=list)
+    bound: Boundary = field(default_factory=Boundary)
+    hits: list[Hit] = field(default_factory=list)
+    used_rerank: bool = False
+    early: Answer | None = None
+
+
 class Pipeline:
     """Load the local embedder + Chroma once, then answer many questions."""
 
@@ -87,6 +106,12 @@ class Pipeline:
             self._index = VectorIndex(self.cfg, self._embedder.model_name)
         assert self._index is not None
         return self._embedder, self._index
+
+    def _max_question_chars(self) -> int:
+        try:
+            return int(self.cfg.retrieval.get("max_question_chars") or 1000)
+        except (TypeError, ValueError):
+            return 1000
 
     def _finish(self, ans: Answer) -> Answer:
         ans.used_chunk_ids = _used_chunk_ids(ans.hits, ans.citations)
@@ -113,15 +138,38 @@ class Pipeline:
             log.exception("query log failed")
         return ans
 
-    def ask(self, question: str, *, history: list[dict[str, str]] | None = None,
-            rerank: bool | None = None, rewrite: bool | None = None) -> Answer:
+    def _prepare(
+        self,
+        question: str,
+        *,
+        history: list[dict[str, str]] | None = None,
+        rerank: bool | None = None,
+        rewrite: bool | None = None,
+    ) -> _PreparedAsk:
         cfg = self.cfg
         msgs = cfg.messages
-        q = (question or "").strip()
+        cap = self._max_question_chars()
+        q = sanitize_question(question, max_chars=cap)
         if not q:
-            return self._finish(Answer(status="out_of_scope", text=msgs.get("out_of_scope", ""), question=q))
+            return _PreparedAsk(
+                question=q,
+                early=Answer(status="out_of_scope", text=msgs.get("out_of_scope", ""), question=q),
+            )
+        if looks_like_injection(q):
+            return _PreparedAsk(
+                question=q,
+                early=Answer(
+                    status="out_of_scope",
+                    text=msgs.get("out_of_scope", ""),
+                    question=q,
+                    boundary="injection",
+                ),
+            )
 
-        history = history_window(history or [], history_window_size(cfg))
+        history = sanitize_history(
+            history_window(history or [], history_window_size(cfg)),
+            max_chars=cap,
+        )
         do_rewrite = cfg.retrieval.get("rewrite_with_history", True) if rewrite is None else rewrite
         rewritten = q
         if do_rewrite and history:
@@ -129,11 +177,17 @@ class Pipeline:
 
         bound = detect_with_history(q, rewritten, history)
         if bound.kind == "out_of_scope":
-            return self._finish(Answer(status="out_of_scope", text=msgs.get("out_of_scope", ""), question=q,
-                                       rewritten=rewritten, boundary=bound.kind))
+            return _PreparedAsk(
+                question=q, rewritten=rewritten, history=history, bound=bound,
+                early=Answer(status="out_of_scope", text=msgs.get("out_of_scope", ""), question=q,
+                             rewritten=rewritten, boundary=bound.kind),
+            )
         if bound.kind == "no_account_access":
-            return self._finish(Answer(status="no_account_access", text=msgs.get("no_account_access", ""), question=q,
-                                       rewritten=rewritten, boundary=bound.kind))
+            return _PreparedAsk(
+                question=q, rewritten=rewritten, history=history, bound=bound,
+                early=Answer(status="no_account_access", text=msgs.get("no_account_access", ""), question=q,
+                             rewritten=rewritten, boundary=bound.kind),
+            )
 
         embedder, index = self.ensure()
         rcfg = cfg.retrieval
@@ -162,17 +216,41 @@ class Pipeline:
                 top_n=len(hits),
             )
             used_rerank = any(h.rerank_score for h in hits)
-            hits = drop_weak_hits(hits)
+            min_score = 0.0
+            try:
+                min_score = float(rr.get("min_score") or 0.0)
+            except (TypeError, ValueError):
+                min_score = 0.0
+            hits = drop_weak_hits(hits, refuse_below=min_score if used_rerank else 0.0)
             hits = demote_mismatched_paths(search_q, hits)
-        hits = promote_topic_hits(search_q, hits)[:keep]
+        hits = promote_topic_hits(search_q, hits, history=history)[:keep]
+        return _PreparedAsk(
+            question=q, rewritten=rewritten, search_q=search_q, history=history,
+            bound=bound, hits=hits, used_rerank=used_rerank,
+        )
 
-        gen_q = search_q if search_q != rewritten else rewritten
+    def _complete(self, prep: _PreparedAsk) -> Answer:
+        cfg = self.cfg
+        msgs = cfg.messages
+        bound = prep.bound
+        hits = prep.hits
+        gen_q = prep.rewritten
         if bound.kind in ("no_advice", "personal_boundary"):
             gen_q = (
-                rewritten
+                prep.rewritten
                 + "\n\nענה רק מה כתוב באתר באופן כללי, בלי המלצה אישית ובלי התייחסות לפוליסה ספציפית."
             )
-        data = generate_answer(gen_q, hits, cfg, history=history)
+        try:
+            data = generate_answer(
+                gen_q, hits, cfg, history=prep.history, original=prep.question,
+            )
+        except Exception as exc:
+            log.warning("Gemini generate failed; soft-fail to not_found: %s", str(exc)[:300])
+            if is_claim_sla_question(prep.question):
+                data = {"status": "not_found", "answer": "", "citation_urls": []}
+            else:
+                fallback = grounded_action_fallback(prep.rewritten, hits)
+                data = fallback or {"status": "not_found", "answer": "", "citation_urls": []}
         gen_status = data["status"]
         text = (data.get("answer") or "").strip()
         cites = list(data.get("citation_urls") or [])
@@ -198,17 +276,41 @@ class Pipeline:
             elif extra and extra not in text:
                 text = f"{text}\n\n{extra}".strip()
 
-        return self._finish(Answer(
+        return Answer(
             status=status,
             text=text,
             citations=cites,
             hits=hits,
-            question=q,
-            rewritten=rewritten,
-            search_query=search_q,
-            used_rerank=used_rerank,
+            question=prep.question,
+            rewritten=prep.rewritten,
+            search_query=prep.search_q,
+            used_rerank=prep.used_rerank,
             boundary=bound.kind,
-        ))
+        )
+
+    def ask(self, question: str, *, history: list[dict[str, str]] | None = None,
+            rerank: bool | None = None, rewrite: bool | None = None) -> Answer:
+        prep = self._prepare(question, history=history, rerank=rerank, rewrite=rewrite)
+        if prep.early is not None:
+            return self._finish(prep.early)
+        return self._finish(self._complete(prep))
+
+    def ask_events(
+        self,
+        question: str,
+        *,
+        history: list[dict[str, str]] | None = None,
+        rerank: bool | None = None,
+        rewrite: bool | None = None,
+    ) -> Iterator[tuple[str, Answer | dict[str, str]]]:
+        """Yield ('status', {stage}) then ('done', Answer) for the SSE chat path."""
+        yield ("status", {"stage": "searching"})
+        prep = self._prepare(question, history=history, rerank=rerank, rewrite=rewrite)
+        if prep.early is not None:
+            yield ("done", self._finish(prep.early))
+            return
+        yield ("status", {"stage": "generating"})
+        yield ("done", self._finish(self._complete(prep)))
 
 
 def format_cli(ans: Answer, cfg: Config) -> str:
