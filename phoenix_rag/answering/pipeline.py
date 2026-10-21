@@ -21,7 +21,7 @@ from .boundaries import Boundary, detect_with_history
 from .context import history_window, history_window_size, retrieval_query
 from .context import is_claim_sla_question
 from .generate import generate_answer, grounded_action_fallback, rewrite_question
-from .rerank import demote_mismatched_paths, drop_weak_hits, promote_topic_hits
+from .rerank import demote_mismatched_paths, drop_weak_hits, filter_hits_for_question, promote_topic_hits
 from .rerank import rerank as cohere_rerank
 from .sanitize import looks_like_injection, sanitize_history, sanitize_question
 
@@ -204,7 +204,7 @@ class Pipeline:
             threshold=float(rcfg.get("relevance_threshold") or 0.0),
             max_per_url=int(rcfg.get("max_per_url") or 2),
         )
-        hits = demote_mismatched_paths(search_q, hits)
+        hits = demote_mismatched_paths(search_q, hits, history=history)
         used_rerank = False
         keep = int((rcfg.get("rerank") or {}).get("top_n") or 5)
         if do_rerank and hits:
@@ -222,7 +222,8 @@ class Pipeline:
             except (TypeError, ValueError):
                 min_score = 0.0
             hits = drop_weak_hits(hits, refuse_below=min_score if used_rerank else 0.0)
-            hits = demote_mismatched_paths(search_q, hits)
+            hits = demote_mismatched_paths(search_q, hits, history=history)
+        hits = filter_hits_for_question(search_q, hits, history=history)
         hits = promote_topic_hits(search_q, hits, history=history)[:keep]
         return _PreparedAsk(
             question=q, rewritten=rewritten, search_q=search_q, history=history,
@@ -249,7 +250,7 @@ class Pipeline:
             if is_claim_sla_question(prep.question):
                 data = {"status": "not_found", "answer": "", "citation_urls": []}
             else:
-                fallback = grounded_action_fallback(prep.rewritten, hits)
+                fallback = grounded_action_fallback(prep.rewritten, hits, history=prep.history)
                 data = fallback or {"status": "not_found", "answer": "", "citation_urls": []}
         gen_status = data["status"]
         text = (data.get("answer") or "").strip()

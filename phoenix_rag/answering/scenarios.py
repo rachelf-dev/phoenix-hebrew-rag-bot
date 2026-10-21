@@ -15,6 +15,13 @@ A_URLS = (
     "/claims-customer-service/claims-appartment-insurance/pipeline-damage/",
     "/claims-customer-service/claims-appartment-insurance/damage-to-the-apartment/",
 )
+A_FORBIDDEN = (
+    "/claims-liability-insurance/",
+    "/claims-business-insurance/",
+    "business-burglary",
+    "business-fire",
+    "employers-liability",
+)
 
 
 @dataclass
@@ -29,7 +36,9 @@ class ScenarioResult:
 
 
 def _cite_ok(citations: list[str]) -> bool:
-    return any(n.rstrip("/") in (u or "") for n in A_URLS for u in citations)
+    if not any(n.rstrip("/") in (u or "") for n in A_URLS for u in citations):
+        return False
+    return not any(n in (u or "") for n in A_FORBIDDEN for u in citations)
 
 
 def run_scenarios(cfg: Config, *, rerank: bool = True) -> list[ScenarioResult]:

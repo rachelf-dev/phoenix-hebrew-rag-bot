@@ -18,6 +18,24 @@ from ..indexing.hebrew_lex import tokenize
 from ..indexing.retrieve import Hit
 from .context import claim_path_markers, extract_thread_slots
 
+_FORBIDDEN_APT = (
+    "/claims-liability-insurance/",
+    "/claims-business-insurance/",
+)
+_FORBIDDEN_WHEN_APT_ONLY = _FORBIDDEN_APT + (
+    "/claims-customer-service/claims-car-insurance/",
+    "/claims-customer-service/claims-health-insurance/",
+    "/car-insurance/",
+    "/health-insurance/",
+    "/customer-service/car-insurance/",
+    "/customer-service/travel-insurance/",
+)
+_FORBIDDEN_WHEN_CAR_ONLY = _FORBIDDEN_APT + (
+    "/claims-customer-service/claims-appartment-insurance/",
+    "/apartment-insurance/",
+    "/customer-service/apartment-insurance/",
+)
+
 log = logging.getLogger(__name__)
 
 _TYPE_HE = {
@@ -46,12 +64,148 @@ def _url_path(hit: Hit) -> str:
     return path if path.endswith("/") else f"{path}/"
 
 
+def _path_from_url_or_hit(url_or_hit: Hit | str) -> str:
+    if isinstance(url_or_hit, Hit):
+        return _url_path(url_or_hit)
+    raw = str(url_or_hit or "").strip()
+    path = urlparse(raw).path.lower()
+    return path if path.endswith("/") else f"{path}/"
+
+
+def _conversation_blob(question: str, history: list[dict[str, str]] | None) -> str:
+    parts = [(t.get("content") or "") for t in (history or [])]
+    parts.append(question or "")
+    return " ".join(parts)
+
+
+def _business_liability_question(blob: str) -> bool:
+    return any(x in blob for x in ("עסק", "חבות מעביד", "מעבידים", "אחריות מעביד"))
+
+
+def _apartment_scoped(slots, blob: str) -> bool:
+    if slots.product == "ביטוח דירה":
+        return True
+    if slots.damages:
+        return True
+    if "דירה" in blob and "עסק" not in blob:
+        return True
+    if "בית" in blob and "עסק" not in blob:
+        if slots.wants_claim or slots.damages or any(w in blob for w in ("נזק", "נזיל", "תביע")):
+            return True
+    return False
+
+
+def _car_scoped(slots, blob: str) -> bool:
+    if slots.product == "ביטוח רכב":
+        return True
+    return "רכב" in blob
+
+
+def _health_scoped(slots, blob: str) -> bool:
+    if slots.product == "ביטוח בריאות":
+        return True
+    return "בריאות" in blob and "רכב" not in blob
+
+
+def _travel_scoped(slots, blob: str) -> bool:
+    if slots.product == "ביטוח נסיעות":
+        return True
+    return "נסיעות" in blob or "travel" in blob.lower()
+
+
+def path_matches_question(
+    question: str,
+    url_or_hit: Hit | str,
+    history: list[dict[str, str]] | None = None,
+) -> bool:
+    """True when a URL path fits the question's product/damage scope (unscoped → always True)."""
+    path = _path_from_url_or_hit(url_or_hit)
+    slots = extract_thread_slots(history, question)
+    blob = _conversation_blob(question, history)
+    apt = _apartment_scoped(slots, blob)
+    car = _car_scoped(slots, blob)
+    health = _health_scoped(slots, blob)
+    travel = _travel_scoped(slots, blob)
+    if not (apt or car or health or travel):
+        return True
+    if _business_liability_question(blob):
+        return True
+    forbidden: list[str] = []
+    if apt and not car and not health and not travel:
+        forbidden = list(_FORBIDDEN_WHEN_APT_ONLY)
+    elif car and not apt and not health and not travel:
+        forbidden = list(_FORBIDDEN_WHEN_CAR_ONLY)
+    elif health and not apt and not car:
+        forbidden = list(_FORBIDDEN_APT) + (
+            "/claims-customer-service/claims-appartment-insurance/",
+            "/claims-customer-service/claims-car-insurance/",
+        )
+    elif apt or car or health or travel:
+        forbidden = list(_FORBIDDEN_APT)
+    if any(m in path for m in forbidden):
+        return False
+
+    markers = claim_path_markers(question, history)
+    if "/claims-customer-service/claims-appartment-insurance/" in path:
+        if "pipeline-damage" in path and not any("pipeline-damage" in m for m in markers):
+            return False
+        if "water-heater" in path and not any("water-heater" in m for m in markers):
+            return False
+
+    raw = url_or_hit if isinstance(url_or_hit, str) else (url_or_hit.display_url or url_or_hit.url or "")
+    host = (urlparse(raw).netloc or "").lower()
+    if apt and host and "fnx.co.il" not in host:
+        return False
+
+    return True
+
+
+def filter_hits_for_question(
+    question: str,
+    hits: list[Hit],
+    history: list[dict[str, str]] | None = None,
+) -> list[Hit]:
+    """Drop retrieved chunks whose URLs are off-topic for the question."""
+    if not hits:
+        return hits
+    kept = [h for h in hits if path_matches_question(question, h, history)]
+    if kept:
+        return kept
+    log.warning("topic gate removed all %d hits; keeping hybrid order", len(hits))
+    return hits
+
+
+def filter_citation_urls(
+    question: str,
+    urls: list[str],
+    history: list[dict[str, str]] | None = None,
+    *,
+    max_n: int = 2,
+) -> list[str]:
+    """Keep on-topic citation URLs, preserve order, cap count."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for u in urls:
+        if not u or not str(u).strip():
+            continue
+        key = (u or "").rstrip("/")
+        if key in seen:
+            continue
+        if not path_matches_question(question, u, history):
+            continue
+        seen.add(key)
+        out.append(u.strip())
+        if len(out) >= max_n:
+            break
+    return out
+
+
 def _is_howto(question: str) -> bool:
     q = (question or "").lower()
     return any(m in q for m in (
         "איך", "כיצד", "how do", "how to", "how can",
         "למלא", "טופס", "טפסים", "מה עושים", "מה הצעד",
-        "לאן שולח", "איפה מגיש",
+        "לאן שולח", "איפה מגיש", "מזמינ", "להזמין", "להזמנת",
     ))
 
 
@@ -80,12 +234,26 @@ def _is_claim_howto(question: str, history: list[dict[str, str]] | None = None) 
     ))
 
 
+def _is_car_service_question(question: str, history: list[dict[str, str]] | None = None) -> bool:
+    blob = _conversation_blob(question, history)
+    if not (_car_scoped(extract_thread_slots(history, question), blob) or "רכב" in blob):
+        return False
+    return any(w in blob for w in ("גרר", "גריר", "שירותי דרך", "דרך", "חילוץ", "תקלה בדרך"))
+
+
 def _is_action_hit(hit: Hit, question: str = "", history: list[dict[str, str]] | None = None) -> bool:
     """Self-service how-to page: claims URLs for claim questions, else a deep /customer-service/ page."""
     path = _url_path(hit)
     parts = [p for p in path.strip("/").split("/") if p]
     if _is_claim_howto(question, history):
-        return path.startswith("/claims-customer-service/")
+        if not path.startswith("/claims-customer-service/"):
+            return False
+        return path_matches_question(question, hit, history)
+    if _is_car_service_question(question, history):
+        if path.startswith("/customer-service/car-insurance/") or (
+            path.startswith("/car-insurance/") and hit.section_type in ("service", "guide", "faq", "article")
+        ):
+            return path_matches_question(question, hit, history)
     return path.startswith("/customer-service/") and hit.section_type == "service" and len(parts) >= 3
 
 
@@ -136,11 +304,10 @@ def promote_action_hits(
     for h in hits:
         url = (h.display_url or h.url or "").rstrip("/")
         overlap = _title_overlap(question, h, with_body=True)
-        min_ov = 1 if _is_claim_howto(question, history) else 2
         if (
             len(chosen) < limit
             and _is_action_hit(h, question, history)
-            and overlap >= min_ov
+            and overlap >= 2
             and url not in seen
         ):
             chosen.append(h)
@@ -151,14 +318,25 @@ def promote_action_hits(
     return chosen + rest if chosen else hits
 
 
-def preferred_action_urls(question: str, hits: list[Hit]) -> list[str]:
+def preferred_action_urls(
+    question: str,
+    hits: list[Hit],
+    history: list[dict[str, str]] | None = None,
+) -> list[str]:
     """Self-service action URLs worth citing when the user asked how to do something."""
     if not _is_howto(question):
         return []
+    markers = claim_path_markers(question, history)
     urls: list[str] = []
     for h in hits:
-        if not _is_action_hit(h, question) or _title_overlap(question, h, with_body=True) < 2:
+        if len(urls) >= 2:
+            break
+        if not _is_action_hit(h, question, history) or _title_overlap(question, h, with_body=True) < 2:
             continue
+        if markers:
+            path = _url_path(h)
+            if not any(m in path for m in markers):
+                continue
         u = h.display_url or h.url
         if u and u not in urls:
             urls.append(u)
@@ -195,16 +373,22 @@ def _canonical_product_hits(question: str, hits: list[Hit]) -> list[Hit]:
     return chosen
 
 
-def demote_mismatched_paths(question: str, hits: list[Hit]) -> list[Hit]:
+def demote_mismatched_paths(
+    question: str,
+    hits: list[Hit],
+    history: list[dict[str, str]] | None = None,
+) -> list[Hit]:
     """Apartment/home questions should not rank business-liability pages first."""
-    q = question or ""
-    if "דירה" in q and "עסק" not in q:
+    blob = _conversation_blob(question or "", history)
+    slots = extract_thread_slots(history, question or "")
+    if _apartment_scoped(slots, blob) and not _business_liability_question(blob):
         bad_markers = (
             "/claims-business-insurance/",
-            "/claims-liability-insurance/business",
+            "/claims-liability-insurance/",
             "business-water",
             "business-burglary",
             "business-fire",
+            "employers-liability",
         )
         good, tail = [], []
         for h in hits:
@@ -215,6 +399,7 @@ def demote_mismatched_paths(question: str, hits: list[Hit]) -> list[Hit]:
                 good.append(h)
         if good:
             return good + tail
+    q = question or ""
     qlow = q.lower()
     if ("טסלה" in q or "tesla" in qlow) and "טעינ" not in q and "charging" not in qlow:
         tesla, rest, chargers = [], [], []
@@ -255,10 +440,14 @@ def promote_topic_hits(
     return chosen + rest
 
 
-def preferred_cite_urls(question: str, hits: list[Hit]) -> list[str]:
+def preferred_cite_urls(
+    question: str,
+    hits: list[Hit],
+    history: list[dict[str, str]] | None = None,
+) -> list[str]:
     """URLs the answer should cite: action pages on how-to, product pages on 'what is / what includes'."""
     if _is_howto(question):
-        return preferred_action_urls(question, hits)
+        return preferred_action_urls(question, hits, history=history)
     if not _is_define(question):
         return []
     urls: list[str] = []

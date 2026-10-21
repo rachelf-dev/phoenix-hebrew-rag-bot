@@ -28,6 +28,7 @@ _COVERAGE_RULES = (
 
 _DAMAGE_RULES = (
     ("נזקי מים", ("נזקי מים", "נזילה", "נזיל")),
+    ("נזקי מזג אוויר", ("נזקי מזג אוויר", "מזג אוויר", "ממזג אוויר", "ממזג האוויר", "ממזג")),
     ("צנרת", ("צנרת", "צינור", "pipeline")),
     ("דוד שמש", ("דוד שמש", "דוד השמש", "דוד")),
     ("נזק למבנה", ("נזק למבנה", "נזק לתכולה", "נזק לתכולה")),
@@ -71,6 +72,9 @@ _TOPIC_PHRASES = (
     "דוד השמש",
     "דוד שמש",
     "מוסך הסדר",
+    "שירותי דרך",
+    "גרירה",
+    "גרר",
     "עדכון פרטים",
     "שירות עצמי",
     "הארכת ביטוח",
@@ -85,6 +89,10 @@ _TOPIC_PHRASES = (
 )
 
 _FOLLOWUP_MARKERS = (
+    "הנזק ",
+    "הנזק הוא",
+    "ממזג",
+    "מזג אוויר",
     "איזה ",
     "איזו ",
     "ואיך",
@@ -226,9 +234,26 @@ def _conversation_blob(history: list[dict[str, str]] | None, question: str = "")
     return " ".join(parts)
 
 
-def extract_thread_slots(history: list[dict[str, str]] | None, question: str = "") -> ThreadSlots:
-    """Structured insurance context from the recent thread + current question."""
-    blob = _conversation_blob(history, question)
+def _user_blob(history: list[dict[str, str]] | None, question: str = "") -> str:
+    """User turns only — avoids assistant boilerplate polluting damage/coverage slots."""
+    parts: list[str] = []
+    for t in history or []:
+        role = (t.get("role") or "").strip().lower()
+        if role in ("human", "client", "user"):
+            parts.append(t.get("content") or "")
+    if question:
+        parts.append(question)
+    return " ".join(parts)
+
+
+def _is_short_continuation(question: str) -> bool:
+    q = (question or "").strip()
+    if not q:
+        return False
+    return len(q.split()) <= 12 or len(q) <= 80
+
+
+def _slots_from_blob(blob: str) -> ThreadSlots:
     slots = ThreadSlots()
     for label, keys in _PRODUCT_RULES:
         if any(k in blob for k in keys):
@@ -241,18 +266,40 @@ def extract_thread_slots(history: list[dict[str, str]] | None, question: str = "
     for label, keys in _DAMAGE_RULES:
         if any(k in blob for k in keys) and label not in slots.damages:
             slots.damages.append(label)
-    if "דוד שמש" in slots.damages and "צנרת" in slots.damages:
-        pass
-    elif "דוד שמש" in slots.damages and "צנרת" in blob and "צנרת" not in slots.damages:
-        slots.damages.append("צנרת")
     slots.wants_form = any(w in blob for w in ("טופס", "טפסים", "למלא", "הורד", "PDF", "pdf"))
     slots.wants_claim = any(w in blob for w in ("תביע", "מגיש", "מגישים", "claim"))
     if slots.product == "ביטוח דירה" and not slots.damages and any(w in blob for w in ("נזק", "מזיק", "נשבר")):
         if "דוד" in blob or "שמש" in blob:
             slots.damages.append("דוד שמש")
     if not slots.product and slots.damages:
-        if any(d in slots.damages for d in ("דוד שמש", "צנרת", "נזקי מים", "נזק למבנה", "נזק לצד שלישי")):
+        if any(
+            d in slots.damages
+            for d in ("דוד שמש", "צנרת", "נזקי מים", "נזקי מזג אוויר", "נזק למבנה", "נזק לצד שלישי")
+        ):
             slots.product = "ביטוח דירה"
+    return slots
+
+
+def _merge_thread_slots(base: ThreadSlots, inherited: ThreadSlots) -> ThreadSlots:
+    out = ThreadSlots(
+        product=base.product or inherited.product,
+        coverage=base.coverage or inherited.coverage,
+        damages=list(dict.fromkeys([*base.damages, *inherited.damages])),
+        wants_form=base.wants_form or inherited.wants_form,
+        wants_claim=base.wants_claim or inherited.wants_claim,
+    )
+    return out
+
+
+def extract_thread_slots(history: list[dict[str, str]] | None, question: str = "") -> ThreadSlots:
+    """Structured insurance context from the thread + current question (user turns weighted)."""
+    user_blob = _user_blob(history, question)
+    slots = _slots_from_blob(user_blob)
+    if history and (_is_short_continuation(question) or is_followup(question, history)):
+        prior = _slots_from_blob(_user_blob(history, ""))
+        slots = _merge_thread_slots(slots, prior)
+    if "דוד שמש" in slots.damages and "צנרת" in user_blob and "צנרת" not in slots.damages:
+        slots.damages.append("צנרת")
     return slots
 
 
@@ -342,6 +389,13 @@ def _compose_from_slots(original: str, slots: ThreadSlots) -> str:
     if any(p in orig for p in ("ואיך ממשיכ", "משם", "מכאן", "הצעד הבא")):
         return f"איך ממשיכים בהגשת תביעת {damage or 'נזק'} ב{product}{cov}"
 
+    if any(p in orig for p in ("מזג אוויר", "ממזג", "נזקי מזג")):
+        if "דוד שמש" in slots.damages or "דוד" in orig:
+            return (
+                f"מה עושים כשהנזק לדוד השמש כתוצאה מנזקי מזג אוויר ב{product}"
+                f" — תביעה והרחבות לדודים"
+            )
+
     if damage and not any(d in orig for d in slots.damages):
         if "תביע" in orig or "מגיש" in orig or "מגישים" in orig:
             return f"איך מגישים תביעת {damage} ב{product}{cov}"
@@ -399,6 +453,11 @@ def heuristic_rewrite(original: str, rewritten: str, history: list[dict[str, str
     if is_claim_sla_question(orig):
         return _compose_from_slots(orig, slots)[:900]
 
+    if is_followup(orig, turns) and (slots.damages or slots.product or slots.coverage):
+        composed = _compose_from_slots(orig, slots)
+        if composed != orig:
+            return composed[:900]
+
     if not is_followup(orig, turns) and len(orig) > 120 and not slots.damages:
         return rew[:900]
 
@@ -438,16 +497,32 @@ def claim_path_markers(question: str, history: list[dict[str, str]] | None = Non
     """URL path substrings to promote when retrieval targets apartment/car claims."""
     if is_claim_sla_question(question):
         return []
-    blob = f"{question} {_conversation_blob(history)}"
+    user_blob = _user_blob(history, question)
     slots = extract_thread_slots(history, question)
     markers: list[str] = []
-    if any(x in blob for x in ("צנרת", "שרברב", "pipeline")):
+    plumber_topic = (
+        slots.coverage in ("שרברב הסדר", "שרברב פרטי")
+        or "צנרת" in slots.damages
+        or any(x in user_blob for x in ("צנרת", "שרברב", "pipeline", "נזיל", "נזקי מים"))
+    )
+    boiler_topic = (
+        "דוד שמש" in slots.damages
+        or "נזקי מזג אוויר" in slots.damages
+        or any(x in user_blob for x in ("דוד", "שמש", "water-heater", "מזג אוויר", "ממזג"))
+    )
+    if plumber_topic:
         markers.append("/claims-customer-service/claims-appartment-insurance/pipeline-damage/")
-    if any(x in blob for x in ("דוד", "שמש", "water-heater")):
+    if boiler_topic:
         markers.append("/claims-customer-service/claims-appartment-insurance/water-heater/")
+    blob = f"{question} {_conversation_blob(history)}"
     if "נזק לצד שלישי" in slots.damages or any(x in blob for x in ("צד שלישי", "שכן", "השכן")):
         markers.append("/claims-customer-service/claims-appartment-insurance/")
-    if slots.product == "ביטוח דירה" or "דירה" in blob:
+    home_claim = (
+        "בית" in blob
+        and "עסק" not in blob
+        and (slots.wants_claim or slots.damages or "תביע" in blob)
+    )
+    if slots.product == "ביטוח דירה" or "דירה" in blob or home_claim:
         if slots.wants_claim or "תביע" in blob:
             markers.append("/claims-customer-service/claims-appartment-insurance/")
     if slots.product == "ביטוח רכב" or "רכב" in blob:

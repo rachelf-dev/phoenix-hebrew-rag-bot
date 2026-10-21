@@ -28,6 +28,7 @@ class EvalQuestion:
     question: str
     expected_answer_type: str
     expected_url_contains: list[str] = field(default_factory=list)
+    forbidden_url_contains: list[str] = field(default_factory=list)
     required_facts: list[str] = field(default_factory=list)
     history: list[dict[str, str]] = field(default_factory=list)
     hidden: bool = False
@@ -81,6 +82,9 @@ def load_questions(path: Path, *, include_hidden: bool = True) -> list[EvalQuest
         urls = raw.get("expected_url_contains") or raw.get("expect") or []
         if isinstance(urls, str):
             urls = [urls]
+        forbidden = raw.get("forbidden_url_contains") or []
+        if isinstance(forbidden, str):
+            forbidden = [forbidden]
         out.append(
             EvalQuestion(
                 id=str(raw.get("id") or f"q{len(out)+1:02d}"),
@@ -88,6 +92,7 @@ def load_questions(path: Path, *, include_hidden: bool = True) -> list[EvalQuest
                 question=str(raw["question"]),
                 expected_answer_type=str(raw.get("expected_answer_type") or "answered"),
                 expected_url_contains=[u.rstrip("/") for u in urls if u],
+                forbidden_url_contains=[u.rstrip("/") for u in forbidden if u],
                 required_facts=list(raw.get("required_facts") or []),
                 history=list(raw.get("history") or []),
                 hidden=bool(raw.get("hidden")),
@@ -102,6 +107,12 @@ def _url_hit(needles: list[str], urls: list[str], *, require_all: bool = False) 
         return bool(urls)
     if require_all:
         return all(any(n in (u or "") for u in urls) for n in needles)
+    return any(n in (u or "") for n in needles for u in urls)
+
+
+def _url_forbidden(needles: list[str], urls: list[str]) -> bool:
+    if not needles:
+        return False
     return any(n in (u or "") for n in needles for u in urls)
 
 
@@ -155,7 +166,11 @@ def _possible_hallucination(q: EvalQuestion, ans: Answer) -> bool:
 def score_question(q: EvalQuestion, ans: Answer, *, retrieval_hit: bool, top_rrf: float) -> QuestionResult:
     exp = q.expected_answer_type
     cites = list(ans.citations)
-    citation_ok = _url_hit(q.expected_url_contains, cites) if q.expected_url_contains else True
+    citation_ok = True
+    if q.expected_url_contains:
+        citation_ok = _url_hit(q.expected_url_contains, cites)
+    if citation_ok and q.forbidden_url_contains:
+        citation_ok = not _url_forbidden(q.forbidden_url_contains, cites)
     halluc = _possible_hallucination(q, ans)
 
     if exp == "answered":
