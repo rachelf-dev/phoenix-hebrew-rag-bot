@@ -1,1 +1,0 @@
-# Placeholder so Docker/Railway builds have data/chroma/; replace with a real index (chroma.sqlite3) via volume or local build context.

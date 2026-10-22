@@ -231,34 +231,16 @@ def cmd_chunk(cfg: Config, args: argparse.Namespace) -> int:
 
 # ------------------------------------------------------------------------- index
 def cmd_index(cfg: Config, args: argparse.Namespace) -> int:
-    from .indexing.chunk import chunk_page, load_clean_pages, read_chunks, write_chunks
-    from .indexing.embed import Embedder
-    from .indexing.store import VectorIndex
+    from .indexing.bootstrap import build_vector_index
 
-    log_path = _setup_logging(cfg, "index")
-    log = logging.getLogger("index")
-    if args.rechunk or not cfg.chunks_path.exists():
-        log.info("building chunks from %s", cfg.clean_dir)
-        chunks = []
-        for page in load_clean_pages(cfg.clean_dir, skip_short=True):
-            chunks.extend(chunk_page(page, cfg))
-        write_chunks(chunks, cfg.chunks_path)
-        log.info("wrote %d chunks", len(chunks))
-    else:
-        chunks = list(read_chunks(cfg.chunks_path))
-        log.info("loaded %d chunks from %s", len(chunks), cfg.chunks_path)
-    if args.limit:
-        chunks = chunks[: args.limit]
-        log.info("limit: using first %d chunks", len(chunks))
-
-    embedder = Embedder.from_config(cfg)
-    vectors = _embed_with_cache(cfg, embedder, chunks, log)
-    index = VectorIndex(cfg, embedder, recreate_on_mismatch=True)
-    index.replace_all(chunks, vectors)
-    print(f"\nindexed {len(chunks)} chunks  model={embedder.model_name}  dim={embedder.dim}  chroma={index.count()}")
-    print(f"  log: {log_path}")
-    if not args.no_probe:
-        _run_probe(cfg, embedder, index, k=int(cfg.retrieval.get("top_k", 12)), hybrid=True)
+    _setup_logging(cfg, "index")
+    n = build_vector_index(
+        cfg,
+        rechunk=bool(args.rechunk),
+        limit=int(args.limit or 0),
+        skip_probe=bool(args.no_probe),
+    )
+    print(f"\nindexed {n} chunks  chroma={n}")
     return 0
 
 

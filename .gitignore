@@ -1,8 +1,5 @@
 .env
-data/*
-!data/chroma/
-data/chroma/*
-!data/chroma/.gitkeep
+data/
 logs/
 __pycache__/
 *.pyc
