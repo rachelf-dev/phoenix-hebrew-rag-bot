@@ -47,6 +47,13 @@ def main() -> None:
     if vector_index_ready(cfg):
         print("vector index OK")
     else:
+        has_chunks = cfg.chunks_path.is_file() and cfg.chunks_path.stat().st_size > 0
+        has_clean = cfg.clean_dir.is_dir() and any(cfg.clean_dir.glob("*.json"))
+        if not has_chunks and not has_clean:
+            _fail(
+                f"missing index source: {cfg.chunks_path} (and no JSON under {cfg.clean_dir}). "
+                "Docker image must COPY data/chunks.jsonl into /app/data/."
+            )
         print("vector index missing — building from chunks/clean (this may take a long time on first boot)", flush=True)
         try:
             ensure_vector_index(cfg)

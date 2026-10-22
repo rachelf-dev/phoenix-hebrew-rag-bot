@@ -27,7 +27,10 @@ COPY config/ config/
 COPY phoenix_rag/ phoenix_rag/
 COPY app/ app/
 COPY scripts/check_deploy_ready.py scripts/check_deploy_ready.py
-RUN mkdir -p data logs
+RUN mkdir -p data/chroma logs
+# Index bootstrap source (tracked in git); must exist at /app/data/chunks.jsonl in the container.
+COPY data/chunks.jsonl /app/data/chunks.jsonl
+RUN test -s /app/data/chunks.jsonl
 
 EXPOSE 8080
 
