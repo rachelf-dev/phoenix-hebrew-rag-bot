@@ -75,6 +75,10 @@ def create_app(cfg: Config) -> FastAPI:
     app = FastAPI(title="Phoenix RAG", docs_url=None, redoc_url=None)
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
+    @app.get("/health")
+    def health() -> dict[str, str]:
+        return {"status": "ok"}
+
     @app.get("/")
     def index() -> FileResponse:
         return FileResponse(INDEX_HTML, media_type="text/html; charset=utf-8")

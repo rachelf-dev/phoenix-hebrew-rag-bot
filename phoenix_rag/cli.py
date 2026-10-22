@@ -411,14 +411,28 @@ def _ensure_streamlit_first_run() -> None:
         creds_file.write_text('[general]\nemail = ""\n', encoding="utf-8")
 
 
+def _listen_host_port(args: argparse.Namespace) -> tuple[str, int]:
+    import os
+
+    port = int(os.environ["PORT"]) if os.getenv("PORT") else args.port
+    if os.getenv("HOST"):
+        host = os.environ["HOST"]
+    elif os.getenv("PORT") or os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("RAILWAY_PROJECT_ID"):
+        host = "0.0.0.0"
+    else:
+        host = args.host
+    return host, port
+
+
 def cmd_run(cfg: Config, args: argparse.Namespace) -> int:
     import uvicorn
 
     from app.web import create_app
 
+    host, port = _listen_host_port(args)
     _setup_logging(cfg, "run")
     app = create_app(cfg)
-    url = f"http://{args.host}:{args.port}/"
+    url = f"http://{host}:{port}/"
     print("")
     print("=" * 60)
     print("  Phoenix RAG — FastAPI (עיצוב.txt)")
@@ -428,8 +442,8 @@ def cmd_run(cfg: Config, args: argparse.Namespace) -> int:
     print("")
     uvicorn.run(
         app,
-        host=args.host,
-        port=args.port,
+        host=host,
+        port=port,
         log_level="info",
         access_log=True,
     )

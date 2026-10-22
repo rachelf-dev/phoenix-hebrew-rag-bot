@@ -111,7 +111,9 @@ def load_seeds(path: Path | None = None) -> Seeds:
 
 
 def load_config(config_path: Path | None = None, seeds_path: Path | None = None) -> Config:
-    load_dotenv(ROOT / ".env")
+    # Platform env (Railway, etc.) first; optional repo .env overrides for local dev.
+    load_dotenv()
+    load_dotenv(ROOT / ".env", override=True)
     raw = _load_yaml(config_path or CONFIG_DIR / "config.yaml")
     # Allow a few env overrides without editing YAML.
     if os.getenv("LLM_MODEL"):
