@@ -1,17 +1,18 @@
-"""Chroma vector store + BM25 sidecar. Collection metadata records the embedding model."""
+"""Chroma vector store + BM25 sidecar. Collection metadata records the embedding model; Gemini EF avoids default ONNX."""
 
 from __future__ import annotations
 
 import logging
 import pickle
 from pathlib import Path
-from typing import Iterable
 
 import chromadb
+from chromadb.errors import NotFoundError
 from rank_bm25 import BM25Okapi
 
 from ..config import Config
 from .chunk import Chunk
+from .embed import Embedder, GeminiEmbeddingFunction
 from .hebrew_lex import tokenize
 
 log = logging.getLogger(__name__)
@@ -47,16 +48,62 @@ def _meta(c: Chunk) -> dict:
     }
 
 
+def _collection_meta(model_name: str) -> dict[str, str]:
+    return {"hnsw:space": "cosine", "embedding_model": model_name}
+
+
+def _stored_embedding_model(collection) -> str | None:
+    meta = collection.metadata or {}
+    raw = meta.get("embedding_model")
+    return str(raw) if raw else None
+
+
+def open_collection(
+    client: chromadb.PersistentClient,
+    name: str,
+    model_name: str,
+    ef: GeminiEmbeddingFunction,
+    *,
+    recreate_on_mismatch: bool,
+) -> chromadb.Collection:
+    """Open or create the collection; on index runs, drop and recreate when the stored model differs."""
+    try:
+        try:
+            col = client.get_collection(name=name, embedding_function=ef)
+        except ValueError as exc:
+            # Legacy collections were created with Chroma's default EF; queries use query_embeddings only.
+            if "Embedding function conflict" not in str(exc):
+                raise
+            log.info("opening collection %s without persisted embedding function (legacy index)", name)
+            col = client.get_collection(name=name)
+        stored = _stored_embedding_model(col)
+        if stored and stored != model_name:
+            if recreate_on_mismatch:
+                log.info("embedding model changed (%s -> %s); recreating collection %s", stored, model_name, name)
+                client.delete_collection(name)
+                return client.create_collection(name=name, metadata=_collection_meta(model_name), embedding_function=ef)
+            raise RuntimeError(
+                f"Chroma collection {name!r} was built with embedding_model={stored!r}, "
+                f"but config expects {model_name!r}. Run: python -m phoenix_rag.cli index"
+            )
+        return col
+    except NotFoundError:
+        return client.create_collection(
+            name=name, metadata=_collection_meta(model_name), embedding_function=ef,
+        )
+
+
 class VectorIndex:
-    def __init__(self, cfg: Config, model_name: str):
+    def __init__(self, cfg: Config, embedder: Embedder, *, recreate_on_mismatch: bool = False):
         cfg.ensure_dirs()
         self.cfg = cfg
-        self.model_name = model_name
+        self.embedder = embedder
+        self.model_name = embedder.model_name
         self.client = chromadb.PersistentClient(path=str(cfg.chroma_dir))
         name = cfg.vector_store.get("collection", "fnx_pages")
-        self.collection = self.client.get_or_create_collection(
-            name=name,
-            metadata={"hnsw:space": "cosine", "embedding_model": model_name},
+        ef = GeminiEmbeddingFunction(embedder)
+        self.collection = open_collection(
+            self.client, name, self.model_name, ef, recreate_on_mismatch=recreate_on_mismatch,
         )
         self.bm25_path = cfg.bm25_path
 
@@ -109,3 +156,15 @@ class VectorIndex:
 def load_bm25(path: Path) -> tuple[BM25Okapi, list[str], list[str]]:
     payload = pickle.loads(path.read_bytes())
     return BM25Okapi(payload["tokens"]), payload["ids"], payload["urls"]
+
+
+def read_chroma_embedding_model(chroma_dir: Path, collection_name: str = "fnx_pages") -> str | None:
+    """Return embedding_model metadata without loading a default Chroma embedder."""
+    if not chroma_dir.is_dir():
+        return None
+    client = chromadb.PersistentClient(path=str(chroma_dir))
+    try:
+        col = client.get_collection(name=collection_name)
+    except NotFoundError:
+        return None
+    return _stored_embedding_model(col)

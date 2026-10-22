@@ -53,14 +53,13 @@ chunking:
   keep_faq_pairs_intact: true
 
 embedding:
-  # Primary: local multilingual-e5-base (CPU, no quota). Weights live in models/ (see scripts/fetch_hf_parallel.py).
-  # Alternative: provider: google + model: gemini-embedding-001 — free tier allows only ~1000 texts/day/model,
-  # so a full index (14k chunks) needs billing. Switching provider/model requires a full re-index.
-  provider: sentence-transformers
-  model: models/multilingual-e5-base        # 768-dim; query:/passage: prefixes are added automatically
-  task_document: RETRIEVAL_DOCUMENT         # (Gemini only)
-  task_query: RETRIEVAL_QUERY               # (Gemini only)
-  output_dimensionality: 768                # (Gemini only; MRL truncation, 3072 is native)
+  # Gemini Embedding API (no local torch/e5 at runtime). Free tier ~1000 embedded texts/day/model —
+  # full index (~14k chunks) needs several days with cache resume or billing. Switching model requires re-index.
+  provider: google
+  model: gemini-embedding-001
+  task_document: RETRIEVAL_DOCUMENT
+  task_query: RETRIEVAL_QUERY
+  output_dimensionality: 768                # MRL truncation (3072 is native); L2-normalized in embed.py
   batch_size: 50
   pause_seconds: 0
   # Free tier is ~30K input tokens/minute. Token counts are cl100k (conservative for Hebrew vs Gemini's tokenizer).

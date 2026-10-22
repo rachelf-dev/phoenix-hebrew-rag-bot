@@ -253,7 +253,7 @@ def cmd_index(cfg: Config, args: argparse.Namespace) -> int:
 
     embedder = Embedder.from_config(cfg)
     vectors = _embed_with_cache(cfg, embedder, chunks, log)
-    index = VectorIndex(cfg, embedder.model_name)
+    index = VectorIndex(cfg, embedder, recreate_on_mismatch=True)
     index.replace_all(chunks, vectors)
     print(f"\nindexed {len(chunks)} chunks  model={embedder.model_name}  dim={embedder.dim}  chroma={index.count()}")
     print(f"  log: {log_path}")
@@ -333,7 +333,7 @@ def cmd_probe(cfg: Config, args: argparse.Namespace) -> int:
 
     _setup_logging(cfg, "probe")
     embedder = Embedder.from_config(cfg)
-    index = VectorIndex(cfg, embedder.model_name)
+    index = VectorIndex(cfg, embedder, recreate_on_mismatch=False)
     _run_probe(cfg, embedder, index, k=int(args.k), hybrid=args.hybrid)
     return 0
 
@@ -474,8 +474,11 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
     print(f"clean json: {n_clean}  chunks: {n_chunks}")
     if cfg.chroma_dir.exists():
         try:
+            from .indexing.embed import Embedder
             from .indexing.store import VectorIndex
-            idx = VectorIndex(cfg, cfg.embedding["model"])
+
+            embedder = Embedder.from_config(cfg)
+            idx = VectorIndex(cfg, embedder, recreate_on_mismatch=False)
             print(f"chroma vectors: {idx.count()}  model={cfg.embedding['model']}")
         except Exception as exc:
             print(f"chroma: {exc}")
@@ -530,7 +533,7 @@ def main(argv: list[str] | None = None) -> int:
     p.set_defaults(func=cmd_probe, hybrid=True)
 
     p = sub.add_parser("compare-embeddings", help="bake-off of embedding models on a Hebrew subset (spec 6.4)")
-    p.add_argument("--models", nargs="+", default=["st:models/multilingual-e5-base", "gemini-embedding-001"])
+    p.add_argument("--models", nargs="+", default=["gemini-embedding-001"])
     p.add_argument("--distractors", type=int, default=400)
     p.add_argument("-k", type=int, default=5)
     p.set_defaults(func=cmd_compare)

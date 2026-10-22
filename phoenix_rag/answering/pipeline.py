@@ -93,7 +93,7 @@ class _PreparedAsk:
 
 
 class Pipeline:
-    """Load the local embedder + Chroma once, then answer many questions."""
+    """Load the Gemini embedder + Chroma once, then answer many questions."""
 
     def __init__(self, cfg: Config):
         self.cfg = cfg
@@ -103,7 +103,7 @@ class Pipeline:
     def ensure(self) -> tuple[Embedder, VectorIndex]:
         if self._embedder is None:
             self._embedder = Embedder.from_config(self.cfg)
-            self._index = VectorIndex(self.cfg, self._embedder.model_name)
+            self._index = VectorIndex(self.cfg, self._embedder, recreate_on_mismatch=False)
         assert self._index is not None
         return self._embedder, self._index
 

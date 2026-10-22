@@ -1,4 +1,4 @@
-# Pre-flight for Docker/Railway: verify GEMINI_API_KEY and on-disk Chroma/BM25 before uvicorn starts.
+# Pre-flight for Docker/Render: verify GEMINI_API_KEY and on-disk Chroma/BM25 before uvicorn starts.
 """Usage: check_deploy_ready.py [command ...] — exits 1 if deploy prerequisites are missing."""
 
 from __future__ import annotations
@@ -17,11 +17,11 @@ def _fail(msg: str) -> None:
 
 def main() -> None:
     if not (os.getenv("GEMINI_API_KEY") or "").strip():
-        _fail("GEMINI_API_KEY is not set (Railway → Variables)")
+        _fail("GEMINI_API_KEY is not set (Render/Railway → Environment)")
 
     chroma = ROOT / "data" / "chroma"
     if not chroma.is_dir():
-        _fail(f"missing Chroma directory {chroma} — bake data/ into the image or mount a Railway volume at /app/data")
+        _fail(f"missing Chroma directory {chroma} — bake data/ into the image or mount a volume at /app/data")
     sqlite = chroma / "chroma.sqlite3"
     if not sqlite.is_file():
         _fail(f"missing {sqlite} — run `python -m phoenix_rag.cli index` locally and redeploy with data/")
@@ -30,10 +30,18 @@ def main() -> None:
     if not bm25.is_file():
         _fail(f"missing {bm25} — run index locally and include data/bm25.pkl in the build context")
 
-    model_dir = ROOT / "models" / "multilingual-e5-base"
-    weights = model_dir / "model.safetensors"
-    if not weights.is_file():
-        _fail(f"missing {weights} — rebuild the Docker image (weights are downloaded in Dockerfile)")
+    from phoenix_rag.config import load_config
+    from phoenix_rag.indexing.store import read_chroma_embedding_model
+
+    cfg = load_config()
+    expected = cfg.embedding.get("model") or "gemini-embedding-001"
+    collection = cfg.vector_store.get("collection", "fnx_pages")
+    stored = read_chroma_embedding_model(cfg.chroma_dir, collection_name=collection)
+    if stored and stored != expected:
+        _fail(
+            f"Chroma embedding_model={stored!r} but config expects {expected!r} — "
+            "re-run `python -m phoenix_rag.cli index` and redeploy data/"
+        )
 
     if len(sys.argv) <= 1:
         print("deploy checks OK")

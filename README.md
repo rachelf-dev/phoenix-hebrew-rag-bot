@@ -11,7 +11,7 @@ README בעברית; קוד והערות קוד באנגלית. רישיון: MI
 | שלב (לפי המפרט, סעיף 10) | מצב |
 |---|---|
 | 1. מיפוי האתר – אזורים, seed URLs | הושלם: `docs/site_map.md`, `config/seeds.yaml` |
-| 2. איסוף ואינדוקס – crawler, ניקוי, chunking, embeddings, אינדקס | **הושלם**: 1,091 עמודים → 14,370 קטעים → Chroma + BM25 (`multilingual-e5-base` מקומי, 768 ממדים) |
+| 2. איסוף ואינדוקס – crawler, ניקוי, chunking, embeddings, אינדקס | **הושלם**: 1,091 עמודים → 14,370 קטעים → Chroma + BM25 (`gemini-embedding-001` @ 768, אינדוקס מקומי + cache) |
 | 3. שכבת תשובה | **הושלם**: sanitize → גבולות → היברידי → Cohere Rerank → Gemini 3.5 Flash, ציטוט URL, `not_found` / `unintelligible` |
 | 4. סט הערכה | **הושלם**: `eval/questions.jsonl` (יום 4; legacy `config/eval.yaml` 20+10) |
 | 5. טיפול בגבולות | **הושלם**: מידע אישי / ייעוץ / חשבון / מחוץ לתחום / injection |
@@ -23,16 +23,10 @@ README בעברית; קוד והערות קוד באנגלית. רישיון: MI
 
 ```bash
 pip install -r requirements.txt
-copy .env.example .env     # GEMINI_API_KEY לשכבת התשובה; COHERE_API_KEY ל-Rerank (אופציונלי)
+copy .env.example .env     # GEMINI_API_KEY (תשובות + embeddings); COHERE_API_KEY ל-Rerank (אופציונלי)
 ```
 
-**משקולות מקומיות**: `intfloat/multilingual-e5-base` יושב ב-`models/multilingual-e5-base/` (לא ב-git). אם חסר `model.safetensors` (1,112,201,288 בתים):
-
-```bash
-python scripts/fetch_hf_parallel.py intfloat/multilingual-e5-base model.safetensors models/multilingual-e5-base --parts 8
-```
-
-**מפתח Gemini** (שכבת תשובה / השוואת embeddings, לא חובה לאינדקס): [aistudio.google.com/apikey](https://aistudio.google.com/apikey). מפתחות חדשים מתחילים ב-`AQ.` ועובדים מול Gemini API. אם המפתח כבול ל-"Agent Platform / Vertex AI" יש להוסיף `GOOGLE_GENAI_USE_VERTEXAI=1` ל-`.env`.
+**מפתח Gemini** (שכבת תשובה, אינדוקס ושאילתות): [aistudio.google.com/apikey](https://aistudio.google.com/apikey). מפתחות חדשים מתחילים ב-`AQ.` ועובדים מול Gemini API. אם המפתח כבול ל-"Agent Platform / Vertex AI" יש להוסיף `GOOGLE_GENAI_USE_VERTEXAI=1` ל-`.env`.
 
 ## פקודות
 
@@ -51,8 +45,8 @@ python -m phoenix_rag.cli clean [--limit N] [--url URL] [--verbose 800]
 # 4. chunking: עמודים נקיים -> data/chunks.jsonl (קטעים עם קידומת הקשר, מטא-דאטה מלא)
 python -m phoenix_rag.cli chunk [--verbose 300]
 
-# 5. אינדוקס: embeddings מקומיים (e5) + Chroma + BM25, ואז probe של 10 שאלות בעברית
-python -m phoenix_rag.cli index                      # ריצה מלאה על CPU (~2.5–3 שעות בפעם הראשונה; cache ממשיך אם נעצר)
+# 5. אינדוקס: Gemini embeddings + Chroma + BM25, ואז probe של 10 שאלות בעברית
+python -m phoenix_rag.cli index                      # ריצה מלאה דרך API (מכסה free tier; cache ממשיך אם נעצר)
 python -m phoenix_rag.cli index --limit 120 --no-probe   # בדיקת עשן
 python -m phoenix_rag.cli index --rechunk            # לבנות מחדש גם את chunks.jsonl
 
@@ -108,8 +102,8 @@ python -m phoenix_rag.cli status
 
 ### Embeddings ואינדקס (`phoenix_rag/indexing/`)
 
-* **מודל ראשי**: `intfloat/multilingual-e5-base` מקומי (`provider: sentence-transformers`, 768 ממדים, נרמול L2). קידומות `query:` / `passage:` מתווספות אוטומטית. נבחר כי ה-free tier של Gemini מוגבל ל-**1,000 טקסטים ליום למודל** (כל קטע ב-batch נספר) — 14,370 קטעים היו דורשים שבועיים או חיוב.
-* **חלופה**: `gemini-embedding-001` עם `output_dimensionality: 768` (MRL) ו-`RETRIEVAL_DOCUMENT` / `RETRIEVAL_QUERY`. `embed.py` שומר על תקציב טוקנים לדקה, מגביל גודל בקשה, מכבד `retryDelay` ב-429, ומזהה מכסה יומית (retry ארוך) כדי לעצור בלי לאבד את ה-cache.
+* **מודל ראשי**: `gemini-embedding-001` (`provider: google`, 768 ממדים MRL, נרמול L2) עם `RETRIEVAL_DOCUMENT` / `RETRIEVAL_QUERY`. השרת לא טוען Torch או משקולות מקומיות — רק קריאת embedding לשאילתה בזמן ריצה; האינדקס (`data/chroma`) נבנה מראש (מקומית או עם billing).
+* **קצב ומכסות**: `embed.py` שומר על תקציב טוקנים לדקה, מגביל גודל בקשה, מכבד `retryDelay` ב-429, ומזהה מכסה יומית (free tier ~**1,000 טקסטים ליום למודל**) כדי לעצור בלי לאבד את ה-cache.
 * **Chroma** (`data/chroma`, cosine) – מקומי, ללא שרת, עם מטא-דאטה לסינון. שם המודל נשמר באוסף; החלפת מודל מחייבת אינדוקס מחדש.
 * **BM25** (`data/bm25.pkl`) על טוקניזציה עברית קלה (`hebrew_lex.py`): לכל מילה עם קידומת ה/ו/ב/ל/מ/כ/ש נוסף גם הגזע. מיזוג עם האחזור הסמנטי ב-**RRF** (`retrieve.py`).
 * **המשכיות**: כל embedding נשמר ב-`data/embeddings_cache.sqlite` (מפתח: מודל + ממד + hash של הטקסט). ריצה שנעצרה ממשיכה מאותה נקודה.
@@ -120,10 +114,10 @@ python -m phoenix_rag.cli status
 
 | מועמד | סביבה | hit@5 על תת-קבוצה | הערה |
 |---|---|---|---|
-| `multilingual-e5-base` (מקומי) | CPU, ללא מכסה | **9/10**, MRR 0.850 | נבחר כמודל ראשי |
-| `gemini-embedding-001` | Gemini API | לא הושלם | free tier = 1,000 טקסטים/יום; המכסה היומית כבר מולאה |
+| `multilingual-e5-base` (מקומי, היסטורי) | CPU | **9/10**, MRR 0.850 | הוחלף ב-Gemini לפריסה רזה |
+| `gemini-embedding-001` | Gemini API | ראו `compare-embeddings` | מודל ראשי נוכחי |
 
-ההשוואה רצה עם `python -m phoenix_rag.cli compare-embeddings --models st:models/multilingual-e5-base gemini-embedding-001 --distractors 400`. תת-הקבוצה כוללת את כל הקטעים של עמודי ה-expect ועוד 400 מסיחים (כתובות קצרות כמו `/car-insurance/` תופסות גם עמודי-משנה). Gemini יידלק שוב אחרי איפוס המכסה (00:00 UTC) או עם billing.
+ההשוואה: `python -m phoenix_rag.cli compare-embeddings --models gemini-embedding-001 --distractors 400`. תת-הקבוצה כוללת את כל הקטעים של עמודי ה-expect ועוד 400 מסיחים.
 
 ## שכבת התשובה וההערכה (יום 2)
 
@@ -141,8 +135,8 @@ python -m phoenix_rag.cli status
 
 * **קצב הורדה**: עמוד באתר שוקל ~450KB (רובו תפריטים) ומוגש לא דחוס. בחיבור שנבדק כל עמוד ארך 9–30 שניות, כך שסריקה מלאה של ~1,100 עמודים עשויה לקחת כמה שעות. הריצה ניתנת לעצירה והמשך – ריצה חוזרת מדלגת על כל מה שכבר נאסף ולא השתנה.
 * `data/` ו-`logs/` לא נכנסים ל-git.
-* **סינון NetFree (סביבת הפיתוח)**: `cas-bridge.xethub.hf.co` חסום (418), אבל `hf-mirror.com` → `us.aws.cdn.hf.co` פתוח — כך הורדנו את `multilingual-e5-base` (`scripts/fetch_hf_parallel.py`). `huggingface_hub` נכשל ב-HEAD; `curl -L` עובד. `aiplatform.googleapis.com` (Vertex) חסום; `generativelanguage.googleapis.com` (Gemini API) **פתוח**. `api.openai.com` פתוח אך ללא קרדיט.
-* **Quota של Gemini**: חוץ מ-~30K טוקנים/דקה, ה-free tier מגביל ל-1,000 בקשות embedding ביום למודל (כל טקסט ב-batch = בקשה). לכן האינדקס המלא רץ מקומית. אם מעבירים ל-Gemini: בשגיאת 429 הקוד ממתין / עוצר במכסה יומית; `index` חוזר ממשיך מה-cache.
+* **סינון NetFree (סביבת הפיתוח)**: `aiplatform.googleapis.com` (Vertex) חסום; `generativelanguage.googleapis.com` (Gemini API) **פתוח**.
+* **Quota של Gemini**: חוץ מ-~30K טוקנים/דקה, ה-free tier מגביל ל-1,000 בקשות embedding ביום למודל (כל טקסט ב-batch = בקשה). האינדוקס המלא רץ מחוץ לשרת הפרוד; `index` חוזר ממשיך מה-cache אחרי מכסה יומית.
 * **פערי תוכן ידועים**: ~47 עמודים נכשלו בסריקה (שגיאות שרת/timeout, ראו `status`), וכמה עשרות עמודים הם "iframe בלבד" (טפסים/מחשבונים חיצוניים) ומסומנים `too_short`.
 
 ## מבנה
@@ -161,9 +155,8 @@ app/web.py              FastAPI + /api/ask + /api/ask/stream
 phoenix_rag/cli.py      map | crawl | clean | chunk | index | probe | compare-embeddings | ask | chat | eval | run | serve | inspect | status
 phoenix_rag/crawler/    urls.py (נרמול+סיווג), robots.py, store.py (SQLite), crawl.py
 phoenix_rag/cleaning/   hebrew.py (נרמול טקסט), clean.py (HTML -> בלוקים)
-phoenix_rag/indexing/   chunk.py, embed.py (e5 מקומי + Gemini עם קצב), embed_cache.py, store.py, retrieve.py, compare.py
+phoenix_rag/indexing/   chunk.py, embed.py (Gemini + Chroma EF), embed_cache.py, store.py, retrieve.py, compare.py
 phoenix_rag/answering/  pipeline.py, sanitize.py, context.py, rerank.py, generate.py, boundaries.py, eval_run.py, ui.py
-scripts/                fetch_hf_parallel.py — הורדת משקולות דרך hf-mirror (NetFree)
-models/                 multilingual-e5-base (לא ב-git)
+scripts/                check_deploy_ready.py — בדיקות לפני Docker/Render
 data/                   pages.sqlite, raw/, clean/, chunks.jsonl, embeddings_cache.sqlite, chroma/, bm25.pkl  (לא ב-git)
 ```

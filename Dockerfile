@@ -1,5 +1,5 @@
-# Phoenix RAG FastAPI image for Railway: CPU PyTorch, offline e5 weights, Chroma + BM25 from build context.
-# Plan for 2–4 GB RAM (embedding model ~500 MB loaded + Chroma + request headroom).
+# Phoenix RAG FastAPI image: Gemini embeddings at query time, Chroma + BM25 baked from build context.
+# No local torch/e5 — fits Render free tier RAM when data/ is pre-indexed.
 
 FROM python:3.10-slim-bookworm
 
@@ -7,9 +7,7 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     OMP_NUM_THREADS=2 \
-    MKL_NUM_THREADS=2 \
-    TOKENIZERS_PARALLELISM=false \
-    HF_HUB_DISABLE_XET=1
+    MKL_NUM_THREADS=2
 
 WORKDIR /app
 
@@ -22,38 +20,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
-# CPU-only torch keeps image smaller and matches sentence-transformers on Railway.
-RUN pip install --upgrade pip && \
-    pip install torch --index-url https://download.pytorch.org/whl/cpu && \
-    pip install -r requirements.txt && \
-    pip install "huggingface_hub>=0.26.0"
-
-# Bake multilingual-e5-base into the image (not in git). Index data/ must be present at build or mounted at runtime.
-RUN python - <<'PY'
-from huggingface_hub import snapshot_download
-
-snapshot_download(
-    "intfloat/multilingual-e5-base",
-    local_dir="/app/models/multilingual-e5-base",
-    local_dir_use_symlinks=False,
-)
-PY
-
-ENV HF_HUB_OFFLINE=1 \
-    TRANSFORMERS_OFFLINE=1
+RUN pip install --upgrade pip && pip install -r requirements.txt
 
 COPY config/ config/
 COPY phoenix_rag/ phoenix_rag/
 COPY app/ app/
 COPY scripts/check_deploy_ready.py scripts/check_deploy_ready.py
-# Index is gitignored; `railway up` from a machine with data/ sends it in the build context.
-# Or mount a Railway volume at /app/data with chroma/ + bm25.pkl.
+# Index is gitignored; build context must include data/chroma + data/bm25.pkl (or mount a volume).
 COPY data/ data/
 RUN mkdir -p logs
 
 EXPOSE 8080
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=300s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=90s --retries=3 \
     CMD curl -fsS http://127.0.0.1:${PORT:-8080}/health || exit 1
 
 ENTRYPOINT ["python", "scripts/check_deploy_ready.py"]

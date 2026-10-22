@@ -44,15 +44,15 @@ def build_subset(cfg: Config, expects: list[str], distractors: int, seed: int = 
 
 
 def evaluate_model(cfg: Config, model: str, dim: int, subset: list[Chunk], questions: list[dict], k: int) -> ModelResult:
-    """`model` is a Gemini model name, or `st:<path-or-hub-id>` for a local sentence-transformers model."""
+    """`model` is a Gemini embedding model name (e.g. gemini-embedding-001)."""
     emb = cfg.embedding
-    if model.startswith("st:"):
-        embedder = Embedder(model[3:], provider="sentence-transformers", batch_size=int(emb.get("batch_size", 32)))
-    else:
-        embedder = Embedder(
-            model, provider="google", batch_size=int(emb.get("batch_size", 32)), dim=dim,
-            tokens_per_minute=int(emb.get("tokens_per_minute") or 0), max_batch_tokens=int(emb.get("max_batch_tokens") or 0),
-        )
+    embedder = Embedder(
+        model, provider="google", batch_size=int(emb.get("batch_size", 32)), dim=dim,
+        pause_seconds=float(emb.get("pause_seconds") or 0),
+        task_document=emb.get("task_document", "RETRIEVAL_DOCUMENT"),
+        task_query=emb.get("task_query", "RETRIEVAL_QUERY"),
+        tokens_per_minute=int(emb.get("tokens_per_minute") or 0), max_batch_tokens=int(emb.get("max_batch_tokens") or 0),
+    )
     cache_rel = emb.get("cache_path") or "data/embeddings_cache.sqlite"
     cache = EmbeddingCache(cfg.root / cache_rel, embedder.model_name, embedder.dim)
     texts = [c.embed_text for c in subset]
