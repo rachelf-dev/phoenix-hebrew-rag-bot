@@ -1,5 +1,4 @@
 .env
-data/
 logs/
 __pycache__/
 *.pyc
@@ -7,3 +6,11 @@ __pycache__/
 venv/
 .pytest_cache/
 models/
+
+# data/: ignore heavy/generated artifacts; chunks.jsonl and data/clean/ stay trackable for Render bootstrap
+data/chroma/
+data/raw/
+data/embeddings_cache.sqlite
+data/bm25.pkl
+data/pages.sqlite
+data/sitemap_classification.json
