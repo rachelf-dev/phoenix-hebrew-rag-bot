@@ -11,6 +11,20 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 
+def _ensure_import_path() -> None:
+    """Running as `python scripts/check_deploy_ready.py` puts scripts/ on sys.path, not the repo root."""
+    root = str(ROOT)
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    os.chdir(root)
+    prev = os.environ.get("PYTHONPATH", "")
+    if root not in prev.split(os.pathsep):
+        os.environ["PYTHONPATH"] = root if not prev else f"{root}{os.pathsep}{prev}"
+
+
+_ensure_import_path()
+
+
 def _fail(msg: str) -> None:
     print(f"deploy check failed: {msg}", file=sys.stderr)
     sys.exit(1)
@@ -46,7 +60,7 @@ def main() -> None:
         print("deploy checks OK")
         return
 
-    os.execvp(sys.argv[1], sys.argv[1:])
+    os.execvpe(sys.argv[1], sys.argv[1:], os.environ)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,13 @@
+# Render Blueprint: Web Service using the repo Dockerfile (see Render dashboard if not using Blueprint).
+services:
+  - type: web
+    name: phoenix-rag
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: COHERE_API_KEY
+        sync: false
+        optional: true
