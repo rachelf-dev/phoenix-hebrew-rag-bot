@@ -2,7 +2,7 @@
 
 <!-- Hand-off note for the next chat session: what exists, what is blocked, and what to do next. Update when state changes. -->
 
-עודכן: 18/10/2026
+עודכן: 22/10/2026
 
 ## הפרויקט
 
@@ -56,19 +56,29 @@
 | ריצה מלאה `after_tuned` | ✅ **30/30**, hallucination 0 | `eval/results/20261015T180807Z_after_tuned.json` |
 | כוונון | ✅ EN on-topic, how-to EN, demote business/דירה, c01 wording | `boundaries.py`, `rerank.py`, `generate.py` |
 
-## יום 5 — ממשק Streamlit, אריזה, סיכום
+## יום 5 — ממשק FastAPI, אריזה, סיכום
 
 | שלב | מצב | היכן |
 |---|---|---|
 | UI מלא `עיצוב.txt` + FastAPI | ✅ | `app/static/index.html`, `app/static/phoenix_chat.js`, `app/web.py` |
+| `POST /api/ask/stream` (SSE status + done) | ✅ | `app/web.py`; לקוח: typewriter ב-`phoenix_chat.js` |
 | `python -m phoenix_rag.cli run` | ✅ | port 8501 (uvicorn) |
 | `docs/SUMMARY.md` | ✅ | before/after, ארכיטקטורה, DoD |
 | `docs/demo_script.md` | ✅ | תסריט הדגמה + holdout |
-| `streamlit` ב-requirements | ✅ | `requirements.txt` |
+| Streamlit legacy | — | `app/streamlit_app.py` (לא ב-`requirements.txt`; UI רשמי = FastAPI) |
+
+## אחרי יום 5 — קשיחות קלט (22/10, לא committed)
+
+| שלב | מצב | היכן |
+|---|---|---|
+| Sanitize + injection gate | ✅ | `answering/sanitize.py`, `pipeline.py` |
+| גיבוב / לא מובן → `messages.unintelligible` | ✅ | `config/config.yaml`, `context.py`, `boundaries.py` |
+| בדיקות regression גיבוב | ✅ | `tests/test_unintelligible.py` |
+| Eval `pre_submit` 35/35 | ✅ 21/10 | `eval/results/20261021T134725Z_pre_submit.json` — **לפני** שינויי unintelligible |
 
 ### לפני הגמר (28/10)
 
-1. הרצת eval מלאה אחרי שינוי אחרון (אם יש): `python scripts/eval.py --tag after_tuned`
+1. אחרי commit של unintelligible: `python scripts/eval.py --tag pre_submit` (לעדכן ציון 35/35)
 2. בדיקת clean checkout לפי DoD ב-`docs/SUMMARY.md`
 3. חזרה על `docs/demo_script.md` מול `run`
 4. **Feature freeze** — רק תיקוני באגים / feedback שופטים

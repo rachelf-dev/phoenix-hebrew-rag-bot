@@ -60,3 +60,25 @@ Artifacts: `eval/results/20261015T164914Z_after.json`, `eval/results/20261015T18
 | --- | --- | --- |
 | `c01` | Combined question pulled business water-damage pages | Rephrased question; demote business paths when user says דירה |
 | `f03` | English query gated as `out_of_scope` / Gemini non-JSON | English on-topic lexicon; English how-to rerank; action fallback on non-JSON |
+
+## Oct 21 hardening runs (`eval/questions.jsonl`, expanded set)
+
+After Day-4 tuning, the public eval set grew (35 scored questions in full runs). Artifacts under `eval/results/`:
+
+| Tag | Date | Pass | Notes |
+| --- | --- | --- | --- |
+| `after_hardening` | 20261021T131101Z | 33/35 | First full run on expanded set |
+| `fix_d10_f01` | 20261021T132330Z | 2/2 | Spot re-run after fixes |
+| **`pre_submit`** | **20261021T134725Z** | **35/35** | Reference run before latest `unintelligible` guards (re-run eval after that commit) |
+
+| Metric | `pre_submit` (21 Oct) |
+| --- | --- |
+| Pass rate | **35/35** |
+| Retrieval hit rate | 1.0 |
+| Citation correctness | 1.0 |
+| Correct refusal rate | 1.0 |
+| Hallucination (heuristic) | 0 |
+| Latency p50 (ms) | ~6,352 |
+| Latency p95 (ms) | ~24,154 |
+
+Artifact: `eval/results/20261021T134725Z_pre_submit.json`, summary `…_pre_submit.md`.

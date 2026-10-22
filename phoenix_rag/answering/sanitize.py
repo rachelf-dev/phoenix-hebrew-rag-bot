@@ -1,6 +1,7 @@
 """Strip control chars from chat input and detect prompt-injection jailbreaks.
 
 Runs before rewrite/RAG/Gemini so insurance-flavored jailbreaks never reach the model.
+Also flags keyboard mash / nonsense so thread context cannot rewrite it into a fake claim query.
 """
 
 from __future__ import annotations
@@ -8,6 +9,51 @@ from __future__ import annotations
 import re
 
 DEFAULT_MAX_QUESTION_CHARS = 1000
+
+_QUOTE_PREFIX = "בהתייחס לציטוט הבא מהתשובה:"
+
+# Enough structure to treat as a real question (not random letters).
+_QUESTION_SHAPE = (
+    "?",
+    "איך ",
+    "איך?",
+    "מה ",
+    "מה?",
+    "מי ",
+    "מתי ",
+    "איפה",
+    "האם ",
+    "למה ",
+    "כמה ",
+    "how ",
+    "what ",
+    "when ",
+    "where ",
+    "why ",
+    "can i",
+    "do i",
+)
+
+# Short continuations that are not on the insurance lexicon but still meaningful.
+_CONTINUATION_MARKERS = (
+    "ממזג",
+    "מזג אוויר",
+    "הנזק ",
+    "ואיך",
+    "ומה ",
+    "וגם ",
+    "גם ",
+    "תוך כמה",
+    "האם ",
+    "מה עושים",
+    "מה לעשות",
+    "איזה ",
+    "איזו ",
+    "this ",
+    "that ",
+)
+
+_ACK_WORDS = frozenset({"כן", "לא", "תודה", "אוקיי", "ok", "okay"})
 
 # Phrase-level only: a lone "התעלם" / "ignore" in a real claim question must not match.
 _INJECTION_RE = re.compile(
@@ -56,6 +102,46 @@ def sanitize_text(text: str, *, max_chars: int = DEFAULT_MAX_QUESTION_CHARS) -> 
 def sanitize_question(text: str, *, max_chars: int = DEFAULT_MAX_QUESTION_CHARS) -> str:
     """Normalize the current user question before boundaries, rewrite, and RAG."""
     return sanitize_text(text, max_chars=max_chars)
+
+
+def effective_user_question(text: str) -> str:
+    """User wording only — strips the chat UI quote wrapper when present."""
+    q = (text or "").strip()
+    if not q.startswith(_QUOTE_PREFIX):
+        return q
+    parts = q.split("\n\n", 1)
+    if len(parts) < 2:
+        return ""
+    return parts[1].strip()
+
+
+def is_unintelligible_input(text: str) -> bool:
+    """True for empty, quote-only, or short off-topic keyboard mash (e.g. גשד after a real thread)."""
+    from .boundaries import is_on_topic
+
+    q = effective_user_question(text)
+    if not q:
+        return True
+    if is_on_topic(q):
+        return False
+    low = q.lower()
+    if any(m in q for m in _CONTINUATION_MARKERS):
+        return False
+    if any(c in q for c in _QUESTION_SHAPE):
+        words = q.split()
+        if len(words) >= 2 or len(q) >= 10:
+            return False
+    words = q.split()
+    if len(words) == 1 and words[0].lower() in _ACK_WORDS:
+        return False
+    compact = re.sub(r"\s+", "", q)
+    if len(compact) <= 12 and len(words) <= 2:
+        letters = sum(1 for ch in compact if ("\u0590" <= ch <= "\u05FF") or ch.isascii() and ch.isalpha())
+        if letters >= max(1, len(compact) - 1):
+            return True
+    if len(words) == 1 and len(compact) <= 8 and not any(ch.isdigit() for ch in compact):
+        return True
+    return False
 
 
 def looks_like_injection(text: str) -> bool:

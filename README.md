@@ -12,10 +12,10 @@ README בעברית; קוד והערות קוד באנגלית. רישיון: MI
 |---|---|
 | 1. מיפוי האתר – אזורים, seed URLs | הושלם: `docs/site_map.md`, `config/seeds.yaml` |
 | 2. איסוף ואינדוקס – crawler, ניקוי, chunking, embeddings, אינדקס | **הושלם**: 1,091 עמודים → 14,370 קטעים → Chroma + BM25 (`multilingual-e5-base` מקומי, 768 ממדים) |
-| 3. שכבת תשובה | **הושלם**: היברידי → Cohere Rerank → Gemini Flash, ציטוט URL, `not_found` |
-| 4. סט הערכה (20 עם תשובה באתר + 10 בלי) | **הושלם**: `config/eval.yaml` |
-| 5. טיפול בגבולות | **הושלם**: מידע אישי / ייעוץ / חשבון / מחוץ לתחום |
-| 6. ממשק צ'אט ואריזה | **הושלם**: Streamlit RTL (`run`) + CLI + `docs/SUMMARY.md` |
+| 3. שכבת תשובה | **הושלם**: sanitize → גבולות → היברידי → Cohere Rerank → Gemini 3.5 Flash, ציטוט URL, `not_found` / `unintelligible` |
+| 4. סט הערכה | **הושלם**: `eval/questions.jsonl` (יום 4; legacy `config/eval.yaml` 20+10) |
+| 5. טיפול בגבולות | **הושלם**: מידע אישי / ייעוץ / חשבון / מחוץ לתחום / injection |
+| 6. ממשק צ'אט ואריזה | **הושלם**: FastAPI RTL (`run`) + CLI + `docs/SUMMARY.md` |
 
 ## התקנה
 
@@ -129,11 +129,12 @@ python -m phoenix_rag.cli status
 
 לפי ארגז הכלים של ההאקתון (חלק הפניקס), לא לפי APIs בתשלום:
 
-* **אחזור**: היברידי (וקטור + BM25) כפי שיש היום, ואז **Cohere Rerank** (`rerank-multilingual-v3.0`) על המועמדים — מצמצם ל-`top_n: 5` לפני המודל. בלי מפתח / חסימת NetFree: ממשיכים עם דירוג היברידי.
-* **LLM**: **Gemini 2.5 Flash** (מפתח חינמי מ-AI Studio, `GEMINI_API_KEY`; נפילה ל-`gemini-3.8-flash` ואז `gemini-2.5-flash-lite`). אפשר להוסיף `GEMINI_API_KEY_2` / `_3` — ב-429 הקוד עובר למפתח הבא. ההוראה הקבועה: לענות רק מהקטעים שאוחזרו; אחרת הודעת `not_found`. ציון `URL` בכל תשובה. לא OpenAI — אין API חינמי.
+* **קלט**: `sanitize_question` / `sanitize_history` (אורך מקסימלי, תווי בקרה, סינון jailbreak); **injection** → `out_of_scope`; **גיבוב / לא מובן** → `messages.unintelligible` (בלי שכתוב follow-up מהיסטוריה).
+* **אחזור**: היברידי (וקטור + BM25), ואז **Cohere Rerank** (`rerank-multilingual-v3.0`) על עד 40 מועמדים — מצמצם ל-`top_n: 8` לפני Gemini. אם ציון ה-rerank הטוב ביותר מתחת ל-`min_score` (0.03) → `not_found` בלי LLM. בלי מפתח / חסימת NetFree: ממשיכים עם דירוג היברידי.
+* **LLM**: **Gemini 3.5 Flash Lite** (`gemini-3.5-flash-lite`; נפילה ל-`gemini-3.5-flash`). מפתח AI Studio: `GEMINI_API_KEY`, אופציונלי `GEMINI_API_KEY_1`…`_15` או `GEMINI_API_KEYS` (מופרד בפסיקים) — ב-429 מעבר למפתח הבא. לענות רק מהקטעים שאוחזרו; אחרת `not_found`. ציון `URL` בכל תשובה.
 * **גבולות**: שאלת חשבון/תביעה אישית → `no_account_access`; "הפוליסה שלי" / ייעוץ אישי → תשובה כללית מהאתר + הודעת גבול; נושא לא קשור לאתר → `out_of_scope`.
-* **סט הערכה**: מדד ההצלחה הוא "לא ממציא". **20 שאלות** עם תשובה באתר (חייבות מקור אמיתי) ו-**10 שאלות** בלי תשובה באתר — `config/eval.yaml`. הרצה: `python -m phoenix_rag.cli eval`.
-* **ממשק**: `run` — FastAPI + `app/static/index.html` (עיצוב מלא מ-`עיצוב.txt`, Tailwind/Lucide); `serve` — UI קל; `ask` / `chat` בטרמינל.
+* **סט הערכה**: מדד ההצלחה הוא "לא ממציא". סט ראשי: **`eval/questions.jsonl`** (35 שאלות ציבוריות + holdout; ראו `docs/eval_before_after.md`). ריצה מלאה: `python scripts/eval.py --tag pre_submit` — **35/35** ב-21/10/2026 (`eval/results/20261021T134725Z_pre_submit.json`) *לפני* שינויי `unintelligible` האחרונים; אחרי commit מומלץ eval מחדש. Legacy: `config/eval.yaml` (20+10), `python -m phoenix_rag.cli eval`.
+* **ממשק**: `run` — FastAPI + `app/static/index.html` + `phoenix_chat.js` (`POST /api/ask`, **`POST /api/ask/stream`** — SSE `status` + `done`; typewriter בצד לקוח); `serve` — UI קל; `ask` / `chat` בטרמינל.
 * **סיכום והדגמה**: `docs/SUMMARY.md`, `docs/demo_script.md`, `docs/eval_before_after.md`.
 
 ## הערות תפעול
@@ -148,7 +149,7 @@ python -m phoenix_rag.cli status
 
 ```
 config/config.yaml      הגדרות: סריקה, ניקוי, chunking, embeddings, אחזור (כולל Cohere Rerank), Gemini Flash, הודעות קבועות
-config/eval.yaml        סט הערכה: 20 שאלות עם תשובה באתר + 10 בלי
+eval/questions.jsonl    סט הערכה ראשי (יום 4); config/eval.yaml — legacy 20+10
 config/seeds.yaml       אזורים נכללים/מוחרגים + section_type
 config/probe.yaml       10 שאלות smoke לאחזור (עמוד צפוי לכל שאלה)
 docs/site_map.md        מפת האתר ונימוקים (שלב 1)
@@ -156,12 +157,12 @@ docs/SUMMARY.md         סיכום טכני, הערכה, מגבלות (יום 5)
 docs/demo_script.md     תסריט הדגמה לגמר
 docs/handoff.md         מצב הפרויקט ומסמך מעבר בין סשנים
 app/static/index.html   UI מלא (מקור: עיצוב.txt)
-app/web.py              FastAPI + /api/ask
+app/web.py              FastAPI + /api/ask + /api/ask/stream
 phoenix_rag/cli.py      map | crawl | clean | chunk | index | probe | compare-embeddings | ask | chat | eval | run | serve | inspect | status
 phoenix_rag/crawler/    urls.py (נרמול+סיווג), robots.py, store.py (SQLite), crawl.py
 phoenix_rag/cleaning/   hebrew.py (נרמול טקסט), clean.py (HTML -> בלוקים)
 phoenix_rag/indexing/   chunk.py, embed.py (e5 מקומי + Gemini עם קצב), embed_cache.py, store.py, retrieve.py, compare.py
-phoenix_rag/answering/  pipeline.py (RAG), rerank.py (Cohere), generate.py (Gemini), boundaries.py, eval_run.py, ui.py
+phoenix_rag/answering/  pipeline.py, sanitize.py, context.py, rerank.py, generate.py, boundaries.py, eval_run.py, ui.py
 scripts/                fetch_hf_parallel.py — הורדת משקולות דרך hf-mirror (NetFree)
 models/                 multilingual-e5-base (לא ב-git)
 data/                   pages.sqlite, raw/, clean/, chunks.jsonl, embeddings_cache.sqlite, chroma/, bm25.pkl  (לא ב-git)

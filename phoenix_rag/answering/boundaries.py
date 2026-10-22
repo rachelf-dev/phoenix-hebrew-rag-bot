@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .context import extract_thread_slots, is_followup, thread_has_insurance_slots, thread_has_topics
+from .sanitize import is_unintelligible_input
 
 # Personal-policy: we still retrieve general coverage, then append the boundary message.
 _PERSONAL = (
@@ -181,6 +182,8 @@ def detect_with_history(
     """Apply detect; follow-ups in an on-topic thread go to RAG instead of out_of_scope."""
     original = (original or "").strip()
     rewritten = (rewritten or original).strip()
+    if is_unintelligible_input(original):
+        return Boundary("out_of_scope", "out_of_scope")
     # Keep personal/account/advice from the user's actual wording first.
     orig_bound = detect(original)
     if _hard_boundary(orig_bound):
@@ -197,9 +200,7 @@ def detect_with_history(
     if any(p in original for p in _STANDALONE_OFF_TOPIC):
         return orig_bound
 
-    if thread_has_insurance_slots(history, original) and (
-        _followup_needs_context(original, history) or len(original.split()) <= 14
-    ):
+    if thread_has_insurance_slots(history, original) and _followup_needs_context(original, history):
         return Boundary()
 
     ctx = " ".join(
@@ -221,11 +222,9 @@ def detect_with_history(
         if _hard_boundary(prior):
             continue
         if prior.kind != "out_of_scope" or is_on_topic(text):
-            if _followup_needs_context(original, history) or (
-                len(original.split()) <= 14 and thread_has_insurance_slots(history, original)
-            ):
+            if _followup_needs_context(original, history):
                 return Boundary()
     if extract_thread_slots(history, rewritten).product or extract_thread_slots(history, rewritten).damages:
-        if _followup_needs_context(original, history) or len(original.split()) <= 16:
+        if _followup_needs_context(original, history):
             return Boundary()
     return orig_bound

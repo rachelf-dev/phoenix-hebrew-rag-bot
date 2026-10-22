@@ -1,4 +1,4 @@
-// Phoenix RAG chat client: preserves עיצוב.txt UX; calls POST /api/ask on the FastAPI backend.
+// Phoenix RAG chat client: streaming/typewriter bot replies, quote-on-send UX; POST /api/ask (+ /stream SSE).
 
 (function () {
   "use strict";
@@ -456,7 +456,19 @@
     };
   }
 
-  async function askViaStream(text, history, signal, onStatus) {
+  function sseDeltaText(data) {
+    if (typeof data === "string") return data;
+    if (!data || typeof data !== "object") return "";
+    return data.text ?? data.delta ?? data.token ?? data.content ?? "";
+  }
+
+  async function askViaStream(text, history, signal, streamHandlers) {
+    const onStatus =
+      typeof streamHandlers === "function"
+        ? streamHandlers
+        : streamHandlers && streamHandlers.onStatus;
+    const onDelta = streamHandlers && streamHandlers.onDelta;
+
     const res = await fetch("/api/ask/stream", {
       method: "POST",
       headers: {
@@ -473,6 +485,10 @@
     let donePayload = null;
     const push = createSseParser((name, data) => {
       if (name === "status" && onStatus) onStatus((data && data.stage) || "");
+      if ((name === "delta" || name === "token" || name === "chunk") && onDelta) {
+        const piece = sseDeltaText(data);
+        if (piece) onDelta(piece);
+      }
       if (name === "done") donePayload = data;
     });
     while (true) {
@@ -640,16 +656,7 @@
     lucide.createIcons();
   }
 
-  function appendBotResponse(answer, citations, hits, sources, sessionId, answerStatus) {
-    if (sessionId !== chatSessionId) {
-      return Promise.resolve();
-    }
-
-    const ind = document.getElementById("temp-indicator");
-    if (ind) ind.remove();
-
-    const sourceCards = coalesceSourceCards(citations, hits, sources, answerStatus);
-
+  function createBotBubbleShell() {
     const uniqueId = "stream-" + Date.now();
     const badgeId = "badge-" + uniqueId;
     const wrap = document.createElement("div");
@@ -663,17 +670,124 @@
         <div class="source-badge-host" id="${badgeId}"></div>
       </div>`;
     messagesContainer.insertBefore(wrap, scrollBottomAnchor);
+    lucide.createIcons();
+    return {
+      targetDiv: document.getElementById(uniqueId),
+      badgeHost: document.getElementById(badgeId),
+    };
+  }
 
-    const targetDiv = document.getElementById(uniqueId);
-    if (!targetDiv) return Promise.resolve();
+  function appendPlainStreamChunk(targetDiv, accumulatedPlain) {
+    targetDiv.classList.add("cursor-blink");
+    targetDiv.innerHTML = escapeHtml(accumulatedPlain).replace(/\n/g, "<br>");
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+  }
+
+  function runTypewriter(targetDiv, plainText, sessionId, onComplete) {
+    if (activeTypewriterCancel) {
+      activeTypewriterCancel();
+      activeTypewriterCancel = null;
+    }
+    const text = String(plainText || "");
+    if (!text) {
+      onComplete();
+      return;
+    }
+
+    let cancelled = false;
+    activeTypewriterCancel = () => {
+      cancelled = true;
+    };
+
+    let idx = 0;
+    const charsPerTick = text.length > 1200 ? 4 : text.length > 600 ? 3 : text.length > 200 ? 2 : 1;
+    const msPerTick = text.length > 800 ? 8 : 12;
+
+    targetDiv.classList.add("cursor-blink");
+    targetDiv.innerHTML = "";
+
+    function tick() {
+      if (cancelled || sessionId !== chatSessionId) {
+        activeTypewriterCancel = null;
+        return;
+      }
+      if (idx >= text.length) {
+        targetDiv.classList.remove("cursor-blink");
+        activeTypewriterCancel = null;
+        onComplete();
+        return;
+      }
+      let chunkHtml = "";
+      for (let n = 0; n < charsPerTick && idx < text.length; n++) {
+        const ch = text.charAt(idx++);
+        chunkHtml += ch === "\n" ? "<br>" : escapeHtml(ch);
+      }
+      targetDiv.innerHTML += chunkHtml;
+      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+      setTimeout(tick, msPerTick);
+    }
+    tick();
+  }
+
+  function finalizeBotBubble(targetDiv, badgeHost, answer, citations, hits, sourceCards) {
+    targetDiv.classList.remove("cursor-blink");
     targetDiv.innerHTML = formatAnswerHtml(answer, hits, citations, sourceCards);
-    const badgeHost = document.getElementById(badgeId);
     if (badgeHost) {
       badgeHost.innerHTML = buildSourceBadge(hits, sourceCards);
     }
     lucide.createIcons();
     messagesContainer.scrollTop = messagesContainer.scrollHeight;
-    return Promise.resolve();
+  }
+
+  function appendBotResponse(
+    answer,
+    citations,
+    hits,
+    sources,
+    sessionId,
+    answerStatus,
+    streamOpts
+  ) {
+    if (sessionId !== chatSessionId) {
+      return Promise.resolve();
+    }
+
+    const ind = document.getElementById("temp-indicator");
+    if (ind) ind.remove();
+
+    const sourceCards = coalesceSourceCards(citations, hits, sources, answerStatus);
+    const preStreamed = streamOpts && streamOpts.preStreamedPlain;
+
+    let targetDiv = streamOpts && streamOpts.targetDiv;
+    let badgeHost = streamOpts && streamOpts.badgeHost;
+    if (!targetDiv) {
+      const shell = createBotBubbleShell();
+      targetDiv = shell.targetDiv;
+      badgeHost = shell.badgeHost;
+    }
+    if (!targetDiv) return Promise.resolve();
+
+    if (preStreamed) {
+      finalizeBotBubble(targetDiv, badgeHost, answer, citations, hits, sourceCards);
+      return Promise.resolve();
+    }
+
+    const plain = plainAnswerForTyping(answer);
+    if (!plain || plain.length < 2) {
+      finalizeBotBubble(targetDiv, badgeHost, answer, citations, hits, sourceCards);
+      return Promise.resolve();
+    }
+
+    return new Promise((resolve) => {
+      runTypewriter(targetDiv, plain, sessionId, () => {
+        if (sessionId !== chatSessionId) {
+          resolve();
+          return;
+        }
+        finalizeBotBubble(targetDiv, badgeHost, answer, citations, hits, sourceCards);
+        resolve();
+      });
+    });
   }
 
   async function submitUserMessage() {
@@ -683,6 +797,7 @@
     if (!text) return;
 
     const quoteAtSend = pendingQuoteText;
+    clearPendingQuote();
     const sessionAtSend = chatSessionId;
     const controller = new AbortController();
     activeAskAbort = controller;
@@ -696,29 +811,56 @@
     showTypingIndicator();
     scrollToBottomSmooth();
 
+    let liveStreamPlain = "";
+    let liveStreamTarget = null;
+    let liveStreamBadgeHost = null;
+
+    function onStreamDelta(piece) {
+      if (sessionAtSend !== chatSessionId) return;
+      liveStreamPlain += piece;
+      if (!liveStreamTarget) {
+        const ind = document.getElementById("temp-indicator");
+        if (ind) ind.remove();
+        const shell = createBotBubbleShell();
+        liveStreamTarget = shell.targetDiv;
+        liveStreamBadgeHost = shell.badgeHost;
+      }
+      if (liveStreamTarget) appendPlainStreamChunk(liveStreamTarget, liveStreamPlain);
+    }
+
     try {
       const history = conversationHistory.slice(-HISTORY_WINDOW);
       let data;
       try {
-        data = await askViaStream(text, history, controller.signal, setTypingStage);
+        data = await askViaStream(text, history, controller.signal, {
+          onStatus: setTypingStage,
+          onDelta: onStreamDelta,
+        });
       } catch (streamErr) {
         if (streamErr && streamErr.name === "AbortError") throw streamErr;
         data = await askViaJson(text, history, controller.signal);
       }
       if (sessionAtSend !== chatSessionId) return;
       const answer = data.answer || data.answer_text || "";
+      const streamOpts = liveStreamTarget
+        ? {
+            targetDiv: liveStreamTarget,
+            badgeHost: liveStreamBadgeHost,
+            preStreamedPlain: liveStreamPlain,
+          }
+        : null;
       await appendBotResponse(
         answer,
         data.citations || [],
         data.hits || [],
         data.sources || [],
         sessionAtSend,
-        data.status || data.answer_type || ""
+        data.status || data.answer_type || "",
+        streamOpts
       );
       if (sessionAtSend !== chatSessionId) return;
       conversationHistory.push({ role: "user", content: text });
       conversationHistory.push({ role: "assistant", content: answer });
-      clearPendingQuote();
     } catch (err) {
       if (err && err.name === "AbortError") return;
       if (sessionAtSend !== chatSessionId) return;

@@ -24,7 +24,7 @@
 | Lexical | BM25 (`rank_bm25`) | שיפור recall לעברית + מונחי ביטוח |
 | אחזור | RRF (semantic + BM25) | `phoenix_rag/indexing/retrieve.py`; עד 2 chunks ל-URL במאגר מועמדים |
 | Rerank | Cohere `rerank-multilingual-v3.0` (אופציונלי) | דירוג מחדש לפני LLM; מדלג אם אין מפתח |
-| LLM | Gemini Flash (AI Studio) | תשובה מבוססת קטעים בלבד, temperature 0 |
+| LLM | Gemini 3.5 Flash Lite (AI Studio) | תשובה מבוססת קטעים בלבד, temperature 0; fallback `gemini-3.5-flash` |
 
 ### השוואת מודלי embedding (מפרט 6.4)
 
@@ -35,18 +35,20 @@
 
 ## איך נבחר הקטע לתשובה
 
-1. שכתוב שאלה (follow-up) לפי היסטוריה — `rewrite_question`.
-2. גבולות (חשבון / ייעוץ / off-topic) — `boundaries.py`.
-3. אחזור היברידי + dedupe URL + סף RRF (כיום **0.0** — כיול הציע ~0.022 אך לא הפריד שאלות לא-ניתנות).
-4. Cohere Rerank → `drop_weak_hits` + promote לדפי פעולה רלוונטיים.
-5. Gemini עם פרומפט קשיח + **ולידציה בקוד**: אין מקור בין הקטעים → `not_found`.
+1. **Sanitize** — `sanitize_question` / `sanitize_history` (אורך, תווי בקרה, סינון jailbreak).
+2. **יציאות מוקדמות** — injection → `out_of_scope`; גיבוב / לא מובן → `messages.unintelligible` (`sanitize.is_unintelligible_input`, ללא שכתוב מהיסטוריה).
+3. **שכתוב follow-up** — `rewrite_question` + heuristics / thread slots ב-`context.py` (רק כשהקלט מובן ו-on-topic).
+4. **גבולות** — חשבון / ייעוץ / off-topic — `boundaries.py` (היסטוריה רק ל-follow-up אמיתי).
+5. **אחזור** — היברידי + dedupe URL + סף RRF (**0.0**); demote/filter/promote דפי פעולה.
+6. **Cohere Rerank** — עד 40 מועמדים → `top_n: 8`; `drop_weak_hits` אם ציון ה-rerank הטוב ביותר מתחת ל-`min_score` (0.03) → `not_found` בלי Gemini.
+7. **Gemini** — JSON + whitelist ציטוטים; claim-SLA → `not_found`; fallback לדף פעולה; אין מקור → `not_found`.
 
 ## מגבלות ידועות
 
 - לא ניגשים לאזור אישי, פוליסות ספציפיות, או מידע שלא פורסם באתר.
 - דפי iframe/טפסים חיצוניים — לעיתים `too_short` או קישור בלבד.
 - NetFree: חסימת Vertex; Gemini API + hf-mirror לעבודה מקומית.
-- Latency: p50 ~6s, p95 ~14s (ריצת `after_tuned`) — תלוי ב-rerank + Gemini.
+- Latency: p50 ~6.4s, p95 ~24s (ריצת `pre_submit`, 21/10) — תלוי ב-rerank + Gemini.
 
 ## רענון אינדקס
 
@@ -59,18 +61,18 @@ python -m phoenix_rag.cli index          # ממשיך מ-cache embeddings
 
 ## הערכה — before / after
 
-פירוט מלא: `docs/eval_before_after.md`. סט: `eval/questions.jsonl` (25 + 5 holdout).
+פירוט מלא: `docs/eval_before_after.md`. סט: `eval/questions.jsonl` (35 שאלות ציבוריות + holdout; 37 שורות בקובץ).
 
-| מדד | לפני (eval.yaml 20+10) | after | after_tuned |
+| מדד | לפני (eval.yaml 20+10) | after_tuned (15/10) | pre_submit (21/10) |
 | --- | --- | --- | --- |
-| Pass rate | 30/30 | 28/30 | **30/30** |
-| Retrieval hit rate | — | 0.944 | **0.944** |
-| Citation correctness | — | 0.889 | **1.0** |
+| Pass rate | 30/30 | **30/30** | **35/35** |
+| Retrieval hit rate | — | 0.944 | **1.0** |
+| Citation correctness | — | 1.0 | **1.0** |
 | Correct refusal | 10/10 | 1.0 | **1.0** |
 | Hallucination (heuristic) | 0 | 0 | **0** |
-| Latency p50 (ms) | — | ~10,514 | **~6,276** |
+| Latency p50 (ms) | — | ~6,276 | **~6,352** |
 
-Artifacts: `eval/results/20261015T180807Z_after_tuned.json`
+Artifact עדכני (לפני שינויי `unintelligible` האחרונים): `eval/results/20261021T134725Z_pre_submit.json`. אחרי commit — הרצת `python scripts/eval.py --tag pre_submit` מחדש.
 
 ### שאלות holdout (לבדיקה ידנית)
 
@@ -83,7 +85,7 @@ python -m phoenix_rag.cli ask "מה כתובת המייל האישית של מנ
 
 - **UI מלא** (Tailwind + Lucide, מקור `עיצוב.txt`): `python -m phoenix_rag.cli run` → FastAPI + `app/static/index.html`
 - **UI קל (stdlib)**: `python -m phoenix_rag.cli serve`
-- API: `POST /api/ask` (שאלה + history), `GET /api/meta` (ספירת עמודים/מקטעים)
+- API: `POST /api/ask`, **`POST /api/ask/stream`** (SSE `status` + `done` — תשובה מלאה ב-`done`; typewriter ב-`phoenix_chat.js`), `GET /api/meta` (ספירת עמודים/מקטעים)
 - לעדכון עיצוב: לערוך `עיצוב.txt` ולהעתיק ל-`app/static/index.html`, לשמור על `phoenix_chat.js`
 
 ## Definition of Done (checklist)
@@ -91,6 +93,7 @@ python -m phoenix_rag.cli ask "מה כתובת המייל האישית של מנ
 - [ ] Clone + `pip install -r requirements.txt` + `.env` עם `GEMINI_API_KEY`
 - [ ] אינדקס קיים (`data/chroma`) או הרצת `index`
 - [ ] `python -m phoenix_rag.cli scenarios` — A/B/C
-- [ ] `python scripts/eval.py --tag after_tuned` — 30/30
+- [ ] `python scripts/eval.py --tag pre_submit` — 35/35 (אחרי שינויי unintelligible — eval מחדש)
+- [ ] `python tests/test_unintelligible.py` — גיבוב אחרי שרשור לא יורש נזילה
 - [ ] 5 שאלות holdout (`h01`–`h05`) — ידנית או `--json`
 - [ ] `python -m phoenix_rag.cli run` — צ'אט RTL + פאנל "איך מצאתי את זה"

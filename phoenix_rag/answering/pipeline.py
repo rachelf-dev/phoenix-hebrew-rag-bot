@@ -23,7 +23,7 @@ from .context import is_claim_sla_question
 from .generate import generate_answer, grounded_action_fallback, rewrite_question
 from .rerank import demote_mismatched_paths, drop_weak_hits, filter_hits_for_question, promote_topic_hits
 from .rerank import rerank as cohere_rerank
-from .sanitize import looks_like_injection, sanitize_history, sanitize_question
+from .sanitize import is_unintelligible_input, looks_like_injection, sanitize_history, sanitize_question
 
 log = logging.getLogger(__name__)
 
@@ -163,6 +163,16 @@ class Pipeline:
                     text=msgs.get("out_of_scope", ""),
                     question=q,
                     boundary="injection",
+                ),
+            )
+        if is_unintelligible_input(q):
+            return _PreparedAsk(
+                question=q,
+                early=Answer(
+                    status="not_found",
+                    text=msgs.get("unintelligible", msgs.get("not_found", "")),
+                    question=q,
+                    boundary="unintelligible",
                 ),
             )
 

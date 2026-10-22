@@ -310,8 +310,10 @@ def thread_has_insurance_slots(history: list[dict[str, str]] | None, question: s
 
 def is_followup(question: str, history: list[dict[str, str]] | None = None) -> bool:
     """True for short / deictic turns that need thread context for search."""
+    from .sanitize import is_unintelligible_input
+
     q = (question or "").strip()
-    if not q:
+    if not q or is_unintelligible_input(q):
         return False
     words = q.split()
     short = len(q) <= 90 or len(words) <= 14
@@ -325,7 +327,7 @@ def is_followup(question: str, history: list[dict[str, str]] | None = None) -> b
         return True
     if history and len(words) <= 14 and thread_has_insurance_slots(history, q):
         return len(words) <= 10
-    return len(words) <= 6
+    return False
 
 
 def topic_anchors(history: list[dict[str, str]] | None, question: str = "") -> list[str]:
@@ -412,7 +414,15 @@ def _compose_from_slots(original: str, slots: ThreadSlots) -> str:
         return f"תביעת נזק מ{dmg} של שכן ב{product} — כיסוי ומה לעשות"
 
     if damage and len(orig.split()) <= 14:
-        return f"{orig} — {damage} ב{product}{cov}".strip(" —")
+        from .boundaries import is_on_topic
+        from .sanitize import is_unintelligible_input
+
+        if not is_unintelligible_input(orig) and (
+            is_on_topic(orig)
+            or any(m in orig for m in _FOLLOWUP_MARKERS)
+            or any(m in orig for m in _DEICTIC)
+        ):
+            return f"{orig} — {damage} ב{product}{cov}".strip(" —")
 
     if damage and ("תביע" in orig or "מגיש" in orig) and slots.wants_claim:
         return f"תביעת {damage} ב{product}{cov}"
@@ -443,8 +453,12 @@ def _rewrite_needs_slots(original: str, rewritten: str, slots: ThreadSlots) -> b
 
 def heuristic_rewrite(original: str, rewritten: str, history: list[dict[str, str]] | None) -> str:
     """Turn vague follow-ups into standalone search questions using thread slots."""
+    from .sanitize import is_unintelligible_input
+
     orig = (original or "").strip()
     rew = (rewritten or "").strip() or orig
+    if is_unintelligible_input(orig):
+        return orig
     turns = history_window(history)
     if not turns:
         return rew[:900]
@@ -481,8 +495,10 @@ def heuristic_rewrite(original: str, rewritten: str, history: list[dict[str, str
 
 def retrieval_query(rewritten: str, history: list[dict[str, str]] | None) -> str:
     """Search text: standalone rewrite plus only specific missing anchors."""
+    from .sanitize import is_unintelligible_input
+
     q = (rewritten or "").strip()
-    if not q:
+    if not q or is_unintelligible_input(q):
         return q
     turns = history_window(history)
     if not turns:

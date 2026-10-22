@@ -25,6 +25,7 @@ from .context import (
     is_followup,
 )
 from .rerank import filter_citation_urls, preferred_action_urls, preferred_cite_urls
+from .sanitize import is_unintelligible_input
 
 log = logging.getLogger(__name__)
 
@@ -146,6 +147,8 @@ def _chunks_block(hits: list[Hit]) -> str:
 
 def rewrite_question(question: str, history: list[dict[str, str]], cfg: Config) -> str:
     """Turn a follow-up into a standalone Hebrew search question using the last 4–6 turns."""
+    if is_unintelligible_input(question):
+        return question
     if not history:
         return question
     turns = history_window(history, history_window_size(cfg))
@@ -220,6 +223,8 @@ def generate_answer(
     original: str | None = None,
 ) -> dict[str, Any]:
     """Call Gemini; returns {status, answer, citation_urls}. Raises on missing key."""
+    if is_unintelligible_input(original or question):
+        return {"status": "not_found", "answer": "", "citation_urls": []}
     if not hits:
         return {"status": "not_found", "answer": "", "citation_urls": []}
     allowed = {(h.display_url or h.url) for h in hits}
