@@ -1,3 +1,4 @@
+# Ignore secrets, generated crawl data, and local caches. Keep index_artifacts/ tracked.
 .env
 logs/
 __pycache__/
@@ -7,10 +8,5 @@ venv/
 .pytest_cache/
 models/
 
-# data/: ignore heavy/generated artifacts; chunks.jsonl and data/clean/ stay trackable for Render bootstrap
-data/chroma/
-data/raw/
-data/embeddings_cache.sqlite
-data/bm25.pkl
-data/pages.sqlite
-data/sitemap_classification.json
+# Crawl / clean / local Chroma stay out of git. Runtime index is index_artifacts/.
+data/

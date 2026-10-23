@@ -65,9 +65,10 @@ def _source_pills(citations: list[str]) -> str:
 @st.cache_resource(show_spinner="טוען מודל ואינדקס…")
 def _pipeline() -> tuple[Pipeline, object]:
     cfg = load_config()
-    if not cfg.chroma_dir.exists():
+    if not cfg.index_npy_path.is_file() or not cfg.index_chunks_path.is_file():
         raise FileNotFoundError(
-            f"חסר אינדקס Chroma ב-{cfg.chroma_dir}. הריצו: python -m phoenix_rag.cli index"
+            f"חסר אינדקס NumPy ({cfg.index_npy_path}, {cfg.index_chunks_path}). "
+            "הריצו: python scripts/build_index_local.py"
         )
     pipe = Pipeline(cfg)
     pipe.ensure()

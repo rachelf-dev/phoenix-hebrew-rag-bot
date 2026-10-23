@@ -12,7 +12,7 @@ from typing import Any
 from ..config import Config
 from ..indexing.embed import Embedder
 from ..indexing.retrieve import search
-from ..indexing.store import VectorIndex
+from ..retrieval.numpy_retriever import NumpyRetriever
 from .context import retrieval_query
 from .generate import rewrite_question
 from .pipeline import Answer, Pipeline
@@ -119,7 +119,7 @@ def _url_forbidden(needles: list[str], urls: list[str]) -> bool:
 def _retrieval_hit(
     cfg: Config,
     embedder: Embedder,
-    index: VectorIndex,
+    index: NumpyRetriever,
     question: str,
     needles: list[str],
     *,

@@ -1,17 +1,21 @@
-"""Hybrid retrieval: semantic (Chroma) + BM25, fused with Reciprocal Rank Fusion.
+"""Hybrid retrieval: semantic (NumPy) + BM25, fused with Reciprocal Rank Fusion.
 
 Uses a deeper candidate pool than top_k and keeps at most two chunks per URL so
 self-service action pages around rank 20 still reach the reranker. Pool size
 follows retrieval.rerank.max_candidates from config.yaml (40 by default).
+
+If the query embedding hits 429 on every Gemini key, search falls back to BM25 only.
 """
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
-from .embed import Embedder
-from .hebrew_lex import tokenize
-from .store import VectorIndex, load_bm25
+from .embed import Embedder, QueryEmbeddingRateLimited
+from ..retrieval.numpy_retriever import NumpyRetriever
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -28,19 +32,6 @@ class Hit:
     rerank_score: float = 0.0
 
 
-_BM25_CACHE: dict[str, tuple[float, tuple]] = {}
-
-
-def _bm25_cached(path):
-    """Rebuilding BM25Okapi over ~14k docs takes seconds; keep one copy per file mtime."""
-    mtime = path.stat().st_mtime
-    hit = _BM25_CACHE.get(str(path))
-    if hit is None or hit[0] != mtime:
-        hit = (mtime, load_bm25(path))
-        _BM25_CACHE[str(path)] = hit
-    return hit[1]
-
-
 def rrf_fuse(rank_lists: list[list[str]], k: int = 60) -> dict[str, float]:
     scores: dict[str, float] = {}
     for ranks in rank_lists:
@@ -49,42 +40,35 @@ def rrf_fuse(rank_lists: list[list[str]], k: int = 60) -> dict[str, float]:
     return scores
 
 
-def search(index: VectorIndex, embedder: Embedder, question: str, *, top_k: int = 12,
-           hybrid: bool = True, threshold: float = 0.0, max_per_url: int = 2) -> list[Hit]:
-    """Hybrid search; `threshold` is an RRF floor (0.0 until Day-4 calibration)."""
-    qvec = embedder.encode_queries([question])[0]
-    pool = max(top_k * 2, 40)
-    max_per_url = max(1, int(max_per_url))
-    sem = index.query(qvec, k=pool)
-    sem_ids = sem["ids"][0] if sem["ids"] else []
-    by_id: dict[str, tuple[str, dict]] = {}
-    for i, cid in enumerate(sem_ids):
-        by_id[cid] = (sem["documents"][0][i], sem["metadatas"][0][i])
+def _hit_from_stored(stored, score: float) -> Hit:
+    return Hit(
+        chunk_id=stored.chunk_id,
+        url=stored.url,
+        page_title=stored.page_title,
+        heading_path=stored.heading_path,
+        text=stored.original_text,
+        score=score,
+        section_type=stored.section_type,
+        form_links=stored.form_links,
+        display_url=stored.display_url or stored.url,
+    )
 
-    if hybrid and index.bm25_path.exists():
-        bm25, bm_ids, _urls = _bm25_cached(index.bm25_path)
-        scores = bm25.get_scores(tokenize(question))
-        order = sorted(range(len(bm_ids)), key=lambda i: scores[i], reverse=True)[:pool]
-        bm_rank = [bm_ids[i] for i in order]
-        fused = rrf_fuse([sem_ids, bm_rank])
-    else:
-        fused = {cid: 1.0 / (i + 1) for i, cid in enumerate(sem_ids)}
 
-    # Fetch any BM25-only ids that aren't in the semantic payload.
-    missing = [cid for cid in fused if cid not in by_id]
-    if missing:
-        got = index.collection.get(ids=missing[:80], include=["documents", "metadatas"])
-        for i, cid in enumerate(got["ids"]):
-            by_id[cid] = (got["documents"][i], got["metadatas"][i])
-
-    ranked = sorted(fused.items(), key=lambda kv: kv[1], reverse=True)
+def _hits_from_ranked(
+    index: NumpyRetriever,
+    ranked: list[tuple[str, float]],
+    *,
+    top_k: int,
+    threshold: float,
+    max_per_url: int,
+) -> list[Hit]:
     hits: list[Hit] = []
     per_url: dict[str, int] = {}
     for cid, score in ranked:
-        if cid not in by_id:
+        stored = index.chunk_by_id(cid)
+        if stored is None:
             continue
-        doc, meta = by_id[cid]
-        url = meta.get("display_url", "") or meta.get("url", "")
+        url = stored.display_url or stored.url
         key = (url or "").rstrip("/")
         if threshold > 0 and score < threshold:
             continue
@@ -92,19 +76,46 @@ def search(index: VectorIndex, embedder: Embedder, question: str, *, top_k: int 
             continue
         if key:
             per_url[key] = per_url.get(key, 0) + 1
-        hits.append(
-            Hit(
-                chunk_id=cid,
-                url=meta.get("url", ""),
-                page_title=meta.get("page_title", ""),
-                heading_path=meta.get("heading_path", ""),
-                text=doc,
-                score=score,
-                section_type=meta.get("section_type", ""),
-                form_links=meta.get("form_links", ""),
-                display_url=url,
-            )
-        )
+        hits.append(_hit_from_stored(stored, score))
         if len(hits) >= top_k:
             break
     return hits
+
+
+def search(
+    index: NumpyRetriever,
+    embedder: Embedder,
+    question: str,
+    *,
+    top_k: int = 12,
+    hybrid: bool = True,
+    threshold: float = 0.0,
+    max_per_url: int = 2,
+) -> list[Hit]:
+    """Hybrid search; `threshold` is an RRF floor (0.0 until Day-4 calibration)."""
+    pool = max(top_k * 2, 40)
+    max_per_url = max(1, int(max_per_url))
+
+    try:
+        qvec = embedder.encode_query(question)
+    except QueryEmbeddingRateLimited:
+        log.warning("query embedding 429 on all keys; falling back to BM25-only retrieval")
+        ranked = index.lexical_query(question, pool)
+        return _hits_from_ranked(
+            index, ranked, top_k=top_k, threshold=threshold, max_per_url=max_per_url,
+        )
+
+    sem_pairs = index.semantic_query(qvec, k=pool)
+    sem_ids = [cid for cid, _ in sem_pairs]
+    sem_scores = {cid: sc for cid, sc in sem_pairs}
+
+    if hybrid and index.has_bm25:
+        bm_rank = [cid for cid, _ in index.lexical_query(question, pool)]
+        fused = rrf_fuse([sem_ids, bm_rank])
+    else:
+        fused = {cid: sem_scores.get(cid, 1.0 / (i + 1)) for i, cid in enumerate(sem_ids)}
+
+    ranked = sorted(fused.items(), key=lambda kv: kv[1], reverse=True)
+    return _hits_from_ranked(
+        index, ranked, top_k=top_k, threshold=threshold, max_per_url=max_per_url,
+    )

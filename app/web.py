@@ -66,9 +66,6 @@ def create_app(cfg: Config) -> FastAPI:
         raise FileNotFoundError(f"missing UI template: {INDEX_HTML}")
 
     pipe = Pipeline(cfg)
-    log.info("loading embedder + index for web UI…")
-    pipe.ensure()
-    page_title_index(cfg)
     lock = threading.Lock()
     disclaimer = cfg.messages.get("disclaimer") or ""
 
@@ -78,6 +75,17 @@ def create_app(cfg: Config) -> FastAPI:
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    def _warm() -> None:
+        try:
+            log.info("loading numpy index from index_artifacts (query embed only at ask time)")
+            with lock:
+                pipe.ensure()
+            page_title_index(cfg)
+        except Exception:
+            log.exception("index warm-up failed")
+
+    threading.Thread(target=_warm, daemon=True, name="index-warmup").start()
 
     @app.get("/")
     def index() -> FileResponse:

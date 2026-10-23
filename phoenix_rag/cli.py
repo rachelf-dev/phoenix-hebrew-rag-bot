@@ -4,7 +4,7 @@
     python -m phoenix_rag.cli crawl [--limit N] [--prefix /claims-customer-service/] [--force] [--no-discover]
     python -m phoenix_rag.cli clean [--url URL] [--limit N]   # raw HTML -> data/clean/*.json
     python -m phoenix_rag.cli chunk [--limit N]               # cleaned pages -> data/chunks.jsonl
-    python -m phoenix_rag.cli index [--rechunk]               # embed + Chroma + BM25, then probe
+    python -m phoenix_rag.cli index [--limit N]               # offline embed -> index.npy + BM25 (local)
     python -m phoenix_rag.cli probe [-k 12]                   # Hebrew retrieval smoke test
     python -m phoenix_rag.cli compare-embeddings [--models ...]   # embedding bake-off on a Hebrew subset
     python -m phoenix_rag.cli ask "שאלה" [--json]              # one grounded answer (rerank + Gemini)
@@ -231,16 +231,30 @@ def cmd_chunk(cfg: Config, args: argparse.Namespace) -> int:
 
 # ------------------------------------------------------------------------- index
 def cmd_index(cfg: Config, args: argparse.Namespace) -> int:
-    from .indexing.bootstrap import build_vector_index
+    from .indexing.build_numpy import build_numpy_index
+    from .indexing.chunk import chunk_page, load_clean_pages, write_chunks
 
     _setup_logging(cfg, "index")
-    n = build_vector_index(
+    log = logging.getLogger("index")
+    if args.rechunk:
+        chunks = []
+        for page in load_clean_pages(cfg.clean_dir, skip_short=True):
+            chunks.extend(chunk_page(page, cfg))
+        write_chunks(chunks, cfg.chunks_path)
+        log.info("rechunked -> %d chunks in %s", len(chunks), cfg.chunks_path)
+    n, shape = build_numpy_index(
         cfg,
-        rechunk=bool(args.rechunk),
         limit=int(args.limit or 0),
-        skip_probe=bool(args.no_probe),
+        log=log,
     )
-    print(f"\nindexed {n} chunks  chroma={n}")
+    print(f"\nindexed {n} chunks  numpy shape={shape}")
+    if not args.no_probe:
+        from .indexing.embed import Embedder
+        from .retrieval.numpy_retriever import NumpyRetriever
+
+        embedder = Embedder.from_config(cfg)
+        index = NumpyRetriever.open(cfg, embedder)
+        _run_probe(cfg, embedder, index, k=int(cfg.retrieval.get("top_k", 12)), hybrid=True)
     return 0
 
 
@@ -311,11 +325,11 @@ def _run_probe(cfg: Config, embedder, index, *, k: int, hybrid: bool) -> int:
 def cmd_probe(cfg: Config, args: argparse.Namespace) -> int:
     """Run the Hebrew smoke questions in config/probe.yaml against the live index."""
     from .indexing.embed import Embedder
-    from .indexing.store import VectorIndex
+    from .retrieval.numpy_retriever import NumpyRetriever
 
     _setup_logging(cfg, "probe")
     embedder = Embedder.from_config(cfg)
-    index = VectorIndex(cfg, embedder, recreate_on_mismatch=False)
+    index = NumpyRetriever.open(cfg, embedder)
     _run_probe(cfg, embedder, index, k=int(args.k), hybrid=args.hybrid)
     return 0
 
@@ -397,20 +411,17 @@ def _listen_host_port(args: argparse.Namespace) -> tuple[str, int]:
     import os
 
     port = int(os.environ["PORT"]) if os.getenv("PORT") else args.port
-    if os.getenv("HOST"):
-        host = os.environ["HOST"]
-    elif os.getenv("PORT") or os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("RAILWAY_PROJECT_ID"):
-        host = "0.0.0.0"
-    else:
-        host = args.host
+    host = os.getenv("HOST") or args.host
     return host, port
 
 
 def cmd_run(cfg: Config, args: argparse.Namespace) -> int:
+    import os
     import uvicorn
 
     from app.web import create_app
 
+    os.environ.setdefault("PHOENIX_RUNTIME", "1")
     host, port = _listen_host_port(args)
     _setup_logging(cfg, "run")
     app = create_app(cfg)
@@ -454,16 +465,17 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
     n_clean = len(list(cfg.clean_dir.glob("*.json"))) if cfg.clean_dir.exists() else 0
     n_chunks = sum(1 for _ in cfg.chunks_path.open(encoding="utf-8")) if cfg.chunks_path.exists() else 0
     print(f"clean json: {n_clean}  chunks: {n_chunks}")
-    if cfg.chroma_dir.exists():
+    if cfg.index_npy_path.is_file() and cfg.index_chunks_path.is_file():
         try:
-            from .indexing.embed import Embedder
-            from .indexing.store import VectorIndex
+            from .retrieval.numpy_retriever import NumpyRetriever
 
-            embedder = Embedder.from_config(cfg)
-            idx = VectorIndex(cfg, embedder, recreate_on_mismatch=False)
-            print(f"chroma vectors: {idx.count()}  model={cfg.embedding['model']}")
+            idx = NumpyRetriever(cfg)
+            idx.load()
+            print(f"numpy index: {idx.count()} vectors  model={cfg.embedding['model']}")
         except Exception as exc:
-            print(f"chroma: {exc}")
+            print(f"numpy index: {exc}")
+    else:
+        print(f"numpy index: missing ({cfg.index_npy_path.name} / {cfg.index_chunks_path.name})")
     print("\nlast runs:")
     for row in store.conn.execute("SELECT * FROM runs ORDER BY started_at DESC LIMIT 5"):
         print(f"  {row['run_id']} mode={row['mode']} started={row['started_at']} finished={row['finished_at']}")
@@ -503,7 +515,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--verbose", type=int, default=0, metavar="CHARS")
     p.set_defaults(func=cmd_chunk)
 
-    p = sub.add_parser("index", help="embed chunks and write the Chroma + BM25 index")
+    p = sub.add_parser("index", help="embed chunks locally -> index.npy + index_chunks.json + bm25.pkl")
     p.add_argument("--rechunk", action="store_true", help="rebuild chunks.jsonl from cleaned pages")
     p.add_argument("--limit", type=int, default=0, help="index only the first N chunks (smoke test)")
     p.add_argument("--no-probe", action="store_true", help="skip the Hebrew retrieval smoke test")
@@ -544,7 +556,7 @@ def main(argv: list[str] | None = None) -> int:
     p.set_defaults(func=cmd_eval)
 
     p = sub.add_parser("run", help="FastAPI chat UI (full עיצוב.txt fidelity)")
-    p.add_argument("--host", default="127.0.0.1")
+    p.add_argument("--host", default="0.0.0.0")
     p.add_argument("--port", type=int, default=8080)
     p.add_argument("--headless", action="store_true", help="do not open a browser tab")
     p.set_defaults(func=cmd_run)

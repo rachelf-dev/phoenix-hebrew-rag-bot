@@ -48,8 +48,12 @@ class Config:
         self.raw_dir = self.data_dir / "raw"
         self.clean_dir = self.data_dir / "clean"
         self.chunks_path = self.data_dir / "chunks.jsonl"
-        self.bm25_path = self.data_dir / "bm25.pkl"
-        self.chroma_dir = ROOT / raw.get("vector_store", {}).get("path", "data/chroma")
+        vs = raw.get("vector_store", {})
+        self.chroma_dir = ROOT / vs.get("path", "data/chroma")  # legacy local Chroma only
+        # Runtime reads the committed prebuilt index. Offline `index` writes the same paths.
+        self.index_npy_path = ROOT / vs.get("index_npy", "index_artifacts/index.npy")
+        self.index_chunks_path = ROOT / vs.get("index_chunks", "index_artifacts/index_chunks.json")
+        self.bm25_path = ROOT / vs.get("bm25", "index_artifacts/bm25.pkl")
         self.db_path = self.data_dir / "pages.sqlite"
 
     def __getitem__(self, key: str) -> Any:
@@ -64,7 +68,7 @@ class Config:
         return self.raw["cleaning"]
 
     def ensure_dirs(self) -> None:
-        for d in (self.data_dir, self.raw_dir, self.clean_dir, self.logs_dir, self.chroma_dir):
+        for d in (self.data_dir, self.raw_dir, self.clean_dir, self.logs_dir):
             d.mkdir(parents=True, exist_ok=True)
 
     @property

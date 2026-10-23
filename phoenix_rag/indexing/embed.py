@@ -1,5 +1,8 @@
-"""Gemini embedding wrapper for indexing and retrieval. Rotates GEMINI_API_KEY* on 429, TPM throttle,
-retryDelay, and daily-quota detection. Chroma collection uses GeminiEmbeddingFunction (registered)."""
+"""Gemini embedding wrapper for query-time (and offline index build). Rotates GEMINI_API_KEY* on 429,
+TPM throttle, retryDelay, and daily-quota detection.
+
+Runtime query embedding is one embed_content call per key. Document embedding stays on the offline index build.
+"""
 
 from __future__ import annotations
 
@@ -8,10 +11,7 @@ import os
 import re
 import time
 from collections import deque
-from typing import Any, Sequence
-
-from chromadb.api.types import Documents, Embeddings
-from chromadb.utils.embedding_functions import register_embedding_function
+from typing import Sequence
 
 from ..config import Config
 from ..gemini_keys import gemini_client, gemini_keys
@@ -19,6 +19,10 @@ from ..gemini_keys import gemini_client, gemini_keys
 log = logging.getLogger(__name__)
 
 _RETRYABLE = ("429", "RESOURCE_EXHAUSTED", "503", "UNAVAILABLE", "timeout", "Timeout")
+
+
+class QueryEmbeddingRateLimited(RuntimeError):
+    """Every configured Gemini key returned 429/RESOURCE_EXHAUSTED for this query."""
 
 
 class Embedder:
@@ -80,10 +84,58 @@ class Embedder:
         )
 
     def encode_passages(self, texts: Sequence[str], token_counts: Sequence[int] | None = None) -> list[list[float]]:
+        # The web server sets this so a bug cannot re-embed the corpus on boot or per question.
+        if os.getenv("PHOENIX_RUNTIME", "").lower() in ("1", "true", "yes"):
+            raise RuntimeError(
+                "refusing to embed documents at runtime; load index_artifacts/ and embed the query only"
+            )
         return self._encode_gemini(texts, self.task_document, token_counts)
 
     def encode_queries(self, texts: Sequence[str]) -> list[list[float]]:
+        """Offline/batch query embedding (probe compare). The live server uses encode_query."""
         return self._encode_gemini(texts, self.task_query, None)
+
+    def encode_query(self, text: str) -> list[float]:
+        """Embed one user question. One API call per key, then stop. No document texts, no backoff loop."""
+        cfg = self._types.EmbedContentConfig(
+            task_type=self.task_query,
+            output_dimensionality=self.dim if self.dim else None,
+        )
+        nkeys = len(self._keys)
+        start = self._key_i % nkeys
+        key_order = list(range(start, nkeys)) + list(range(0, start))
+        last: Exception | None = None
+        saw_429 = False
+        for ki in key_order:
+            self._bind_key(ki)
+            try:
+                resp = self._client.models.embed_content(
+                    model=self.model_name, contents=[text], config=cfg,
+                )
+                embeddings = list(resp.embeddings or [])
+                if not embeddings:
+                    raise RuntimeError("Gemini returned no query embedding")
+                if nkeys > 1:
+                    self._advance_key()
+                return _l2(list(embeddings[0].values))
+            except Exception as exc:
+                last = exc
+                msg = str(exc)
+                if "blockByNetFree" in msg or "418" in msg:
+                    raise RuntimeError(
+                        f"NetFree blocked the embedding request: {self.model_name} -> {self._base_url} "
+                        f"(HTTP 418 Blocked by NetFree). Original error: {msg[:300]}"
+                    ) from exc
+                if "429" in msg or "RESOURCE_EXHAUSTED" in msg:
+                    saw_429 = True
+                    log.warning("query embed 429 on key %d/%d", ki + 1, nkeys)
+                    continue
+                raise
+        if saw_429:
+            raise QueryEmbeddingRateLimited(
+                f"query embedding 429 on all {nkeys} key(s)"
+            ) from last
+        raise RuntimeError(f"query embedding failed: {last}") from last
 
     def _encode_gemini(self, texts: Sequence[str], task: str,
                        token_counts: Sequence[int] | None) -> list[list[float]]:
@@ -198,58 +250,6 @@ class Embedder:
                     delay = min(delay * 2, 60)
                     continue
         raise RuntimeError(f"Gemini embeddings failed after retries: {last}") from last
-
-
-@register_embedding_function
-class GeminiEmbeddingFunction:
-    """Chroma embedding function backed by Embedder (documents vs queries use different task types)."""
-
-    def __init__(self, embedder: Embedder):
-        self._embedder = embedder
-
-    def __call__(self, input: Documents) -> Embeddings:
-        texts = list(input)
-        if not texts:
-            return []
-        return self._embedder.encode_passages(texts)
-
-    def embed_query(self, input: Documents) -> Embeddings:
-        texts = list(input)
-        if not texts:
-            return []
-        return self._embedder.encode_queries(texts)
-
-    @staticmethod
-    def name() -> str:
-        return "phoenix_gemini_embedding"
-
-    @staticmethod
-    def build_from_config(config: dict[str, Any]) -> "GeminiEmbeddingFunction":
-        embedder = Embedder(
-            config["model_name"],
-            provider="google",
-            batch_size=int(config.get("batch_size") or 32),
-            dim=int(config.get("dim") or 768),
-            pause_seconds=float(config.get("pause_seconds") or 0),
-            task_document=config.get("task_document") or "RETRIEVAL_DOCUMENT",
-            task_query=config.get("task_query") or "RETRIEVAL_QUERY",
-            tokens_per_minute=int(config.get("tokens_per_minute") or 0),
-            max_batch_tokens=int(config.get("max_batch_tokens") or 0),
-        )
-        return GeminiEmbeddingFunction(embedder)
-
-    def get_config(self) -> dict[str, Any]:
-        e = self._embedder
-        return {
-            "model_name": e.model_name,
-            "batch_size": e.batch_size,
-            "dim": e.dim,
-            "pause_seconds": e.pause_seconds,
-            "task_document": e.task_document,
-            "task_query": e.task_query,
-            "tokens_per_minute": e.tokens_per_minute,
-            "max_batch_tokens": e.max_batch_tokens,
-        }
 
 
 MAX_RETRY_WAIT_SECONDS = 15 * 60  # longer server-requested waits are treated as "quota gone for today"

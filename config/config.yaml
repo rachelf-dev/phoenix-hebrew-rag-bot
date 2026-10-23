@@ -53,8 +53,8 @@ chunking:
   keep_faq_pairs_intact: true
 
 embedding:
-  # Gemini Embedding API (no local torch/e5 at runtime). Free tier ~1000 embedded texts/day/model —
-  # full index (~14k chunks) needs several days with cache resume or billing. Switching model requires re-index.
+  # Gemini Embedding API (no local torch/e5 at runtime). The server loads index_artifacts/ and
+  # embeds only the user query (one call). Offline `index` builds the matrix; switching model requires that rebuild.
   provider: google
   model: gemini-embedding-001
   task_document: RETRIEVAL_DOCUMENT
@@ -69,7 +69,12 @@ embedding:
 
 
 vector_store:
-  provider: chroma
+  provider: numpy
+  # Prebuilt index committed in the repo and copied into the image. Not data/.
+  index_npy: index_artifacts/index.npy
+  index_chunks: index_artifacts/index_chunks.json
+  bm25: index_artifacts/bm25.pkl
+  # legacy local Chroma (not used at runtime on Render):
   path: data/chroma
   collection: fnx_pages
 
@@ -84,7 +89,7 @@ retrieval:
   rerank:
     provider: cohere         # hackathon toolkit: the Phoenix "secret weapon"
     model: rerank-multilingual-v3.0
-    top_n: 8                 # chunks sent to Gemini after rerank, weak-hit drop, and action-page promote
+    top_n: 8                 # shortlist after rerank; the Gemini prompt is capped at 5 chunks
     max_candidates: 40       # hybrid hits sent to Cohere (action pages can sit ~rank 20)
     min_score: 0.03          # peak Cohere score below this → skip Gemini, return *5040
 

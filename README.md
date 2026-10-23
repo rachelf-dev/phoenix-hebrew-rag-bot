@@ -11,7 +11,7 @@ README בעברית; קוד והערות קוד באנגלית. רישיון: MI
 | שלב (לפי המפרט, סעיף 10) | מצב |
 |---|---|
 | 1. מיפוי האתר – אזורים, seed URLs | הושלם: `docs/site_map.md`, `config/seeds.yaml` |
-| 2. איסוף ואינדוקס – crawler, ניקוי, chunking, embeddings, אינדקס | **הושלם**: 1,091 עמודים → 14,370 קטעים → Chroma + BM25 (`gemini-embedding-001` @ 768, אינדוקס מקומי + cache) |
+| 2. איסוף ואינדוקס – crawler, ניקוי, chunking, embeddings, אינדקס | **הושלם**: ~1,091 עמודים → **11,590** קטעים → NumPy + BM25 ב-`index_artifacts/` (`gemini-embedding-001` @ 768) |
 | 3. שכבת תשובה | **הושלם**: sanitize → גבולות → היברידי → Cohere Rerank → Gemini 3.5 Flash, ציטוט URL, `not_found` / `unintelligible` |
 | 4. סט הערכה | **הושלם**: `eval/questions.jsonl` (יום 4; legacy `config/eval.yaml` 20+10) |
 | 5. טיפול בגבולות | **הושלם**: מידע אישי / ייעוץ / חשבון / מחוץ לתחום / injection |
@@ -45,10 +45,13 @@ python -m phoenix_rag.cli clean [--limit N] [--url URL] [--verbose 800]
 # 4. chunking: עמודים נקיים -> data/chunks.jsonl (קטעים עם קידומת הקשר, מטא-דאטה מלא)
 python -m phoenix_rag.cli chunk [--verbose 300]
 
-# 5. אינדוקס: Gemini embeddings + Chroma + BM25, ואז probe של 10 שאלות בעברית
+# 5. אינדוקס (מקומי בלבד): Gemini embeddings -> index_artifacts/ (index.npy + index_chunks.json + bm25.pkl)
 python -m phoenix_rag.cli index                      # ריצה מלאה דרך API (מכסה free tier; cache ממשיך אם נעצר)
 python -m phoenix_rag.cli index --limit 120 --no-probe   # בדיקת עשן
 python -m phoenix_rag.cli index --rechunk            # לבנות מחדש גם את chunks.jsonl
+
+# שרת (טוען את האינדקס המוכן; embedding אחד לכל שאלת משתמש)
+python -m phoenix_rag.cli run                        # 0.0.0.0:$PORT או 8080
 
 # 6. בדיקות אחזור
 python -m phoenix_rag.cli probe [-k 12] [--no-hybrid]          # 10 שאלות smoke מ-config/probe.yaml
@@ -58,7 +61,7 @@ python -m phoenix_rag.cli compare-embeddings [--models a b]    # השוואת מ
 python -m phoenix_rag.cli ask "יש לי נזילה בבית, איך מגישים תביעה?"
 python -m phoenix_rag.cli chat
 python -m phoenix_rag.cli eval [--limit N] [--no-rerank]
-python -m phoenix_rag.cli run [--port 8501]     # UI מלא לפי עיצוב.txt (FastAPI)
+python -m phoenix_rag.cli run [--port 8080]     # UI מלא לפי עיצוב.txt (FastAPI, 0.0.0.0 / $PORT)
 python -m phoenix_rag.cli serve [--port 7860]   # UI קל (stdlib), http://127.0.0.1:7860/
 
 # מצב המאגר וריצות אחרונות
@@ -102,10 +105,10 @@ python -m phoenix_rag.cli status
 
 ### Embeddings ואינדקס (`phoenix_rag/indexing/`)
 
-* **מודל ראשי**: `gemini-embedding-001` (`provider: google`, 768 ממדים MRL, נרמול L2) עם `RETRIEVAL_DOCUMENT` / `RETRIEVAL_QUERY`. השרת לא טוען Torch או משקולות מקומיות — רק קריאת embedding לשאילתה בזמן ריצה; האינדקס (`data/chroma`) נבנה מראש (מקומית או עם billing).
+* **מודל ראשי**: `gemini-embedding-001` (`provider: google`, 768 ממדים MRL, נרמול L2) עם `RETRIEVAL_DOCUMENT` / `RETRIEVAL_QUERY`. השרת **לא** מטמיע מסמכים — הוא טוען `index_artifacts/index.npy` + `index_chunks.json` + `bm25.pkl` ומבצע **קריאת embedding אחת לשאלת המשתמש**. אם כל המפתחות מחזירים 429, האחזור נופל ל-BM25 בלבד.
 * **קצב ומכסות**: `embed.py` שומר על תקציב טוקנים לדקה, מגביל גודל בקשה, מכבד `retryDelay` ב-429, ומזהה מכסה יומית (free tier ~**1,000 טקסטים ליום למודל**) כדי לעצור בלי לאבד את ה-cache.
-* **Chroma** (`data/chroma`, cosine) – מקומי, ללא שרת, עם מטא-דאטה לסינון. שם המודל נשמר באוסף; החלפת מודל מחייבת אינדוקס מחדש.
-* **BM25** (`data/bm25.pkl`) על טוקניזציה עברית קלה (`hebrew_lex.py`): לכל מילה עם קידומת ה/ו/ב/ל/מ/כ/ש נוסף גם הגזע. מיזוג עם האחזור הסמנטי ב-**RRF** (`retrieve.py`).
+* **NumPy** (`index_artifacts/index.npy`, cosine דרך מכפלה אחרי נרמול L2) — האינדקס ב-git ובדימוי Docker. החלפת מודל מחייבת אינדוקס מחדש מקומית.
+* **BM25** (`index_artifacts/bm25.pkl`) על טוקניזציה עברית קלה (`hebrew_lex.py`): לכל מילה עם קידומת ה/ו/ב/ל/מ/כ/ש נוסף גם הגזע. אם ה-pickle נכשל בטעינה, BM25 נבנה מחדש מ-`index_chunks.json` בלי קריאות API. מיזוג עם האחזור הסמנטי ב-**RRF** (`retrieve.py`).
 * **המשכיות**: כל embedding נשמר ב-`data/embeddings_cache.sqlite` (מפתח: מודל + ממד + hash של הטקסט). ריצה שנעצרה ממשיכה מאותה נקודה.
 * **רענון**: `crawl` מסמן עמודים שנעלמו כ-`removed`; `clean` מוחק JSON של עמודים שאינם פעילים; `index --rechunk` בונה את האוסף מחדש. סדר: `crawl → clean → index --rechunk`.
 * **Probe** (`config/probe.yaml`, 10 שאלות, hit = כתובת-היעד מופיעה ב-top-12): היברידי **8/10**, סמנטי בלבד **8/10**. שתי ה-MISS: (1) "נזילה בבית" לא מדרגת את עמוד *נזקי צנרת* (האתר כותב צנרת/מים; Cohere Rerank ביום 2 אמור לעזור); (2) "תביעה בביטוח מחלות קשות" מחזירה את עמוד התביעה `claims-serious-illness` במקום ה-FAQ שסומן כ-expect — תוצאה נכונה יותר ללקוח.
@@ -134,9 +137,13 @@ python -m phoenix_rag.cli status
 ## הערות תפעול
 
 * **קצב הורדה**: עמוד באתר שוקל ~450KB (רובו תפריטים) ומוגש לא דחוס. בחיבור שנבדק כל עמוד ארך 9–30 שניות, כך שסריקה מלאה של ~1,100 עמודים עשויה לקחת כמה שעות. הריצה ניתנת לעצירה והמשך – ריצה חוזרת מדלגת על כל מה שכבר נאסף ולא השתנה.
-* `data/` ו-`logs/` לא נכנסים ל-git.
+* `data/` ו-`logs/` לא נכנסים ל-git. **`index_artifacts/` כן ב-git** (index.npy, index_chunks.json, bm25.pkl).
 * **סינון NetFree (סביבת הפיתוח)**: `aiplatform.googleapis.com` (Vertex) חסום; `generativelanguage.googleapis.com` (Gemini API) **פתוח**.
-* **Quota של Gemini**: חוץ מ-~30K טוקנים/דקה, ה-free tier מגביל ל-1,000 בקשות embedding ביום למודל (כל טקסט ב-batch = בקשה). האינדוקס המלא רץ מחוץ לשרת הפרוד; `index` חוזר ממשיך מה-cache אחרי מכסה יומית.
+* **Quota של Gemini**: האינדוקס המלא רץ מקומית בלבד. בשרת יש embedding אחד לכל שאלה; תשובות זהות נשמרות במטמון קטן (שאלה מנורמלת). ל-Gemini נשלחים לכל היותר 5 קטעים.
+
+## פריסה (Render)
+
+הדימוי מעתיק את `index_artifacts/`, בודק מפתח Gemini ושלושת קבצי האינדקס ב-`scripts/check_deploy_ready.py` (בלי embedding), ומאזין על `0.0.0.0:$PORT`. `/health` מחזיר 200 מיד. `render.yaml` מגדיר `healthCheckPath: /health`. `HEALTHCHECK` ב-Dockerfile עם `start-period=60s`.
 * **פערי תוכן ידועים**: ~47 עמודים נכשלו בסריקה (שגיאות שרת/timeout, ראו `status`), וכמה עשרות עמודים הם "iframe בלבד" (טפסים/מחשבונים חיצוניים) ומסומנים `too_short`.
 
 ## מבנה
@@ -155,8 +162,10 @@ app/web.py              FastAPI + /api/ask + /api/ask/stream
 phoenix_rag/cli.py      map | crawl | clean | chunk | index | probe | compare-embeddings | ask | chat | eval | run | serve | inspect | status
 phoenix_rag/crawler/    urls.py (נרמול+סיווג), robots.py, store.py (SQLite), crawl.py
 phoenix_rag/cleaning/   hebrew.py (נרמול טקסט), clean.py (HTML -> בלוקים)
-phoenix_rag/indexing/   chunk.py, embed.py (Gemini + Chroma EF), embed_cache.py, store.py, retrieve.py, compare.py
+phoenix_rag/indexing/   chunk.py, embed.py (Gemini query embed), embed_cache.py, retrieve.py, compare.py
+phoenix_rag/retrieval/  numpy_retriever.py — טוען index_artifacts/ בלי embedding של מסמכים
 phoenix_rag/answering/  pipeline.py, sanitize.py, context.py, rerank.py, generate.py, boundaries.py, eval_run.py, ui.py
-scripts/                check_deploy_ready.py — בדיקות לפני Docker/Render
-data/                   pages.sqlite, raw/, clean/, chunks.jsonl, embeddings_cache.sqlite, chroma/, bm25.pkl  (לא ב-git)
+scripts/                check_deploy_ready.py — מפתח Gemini + שלושת קבצי האינדקס, בלי embedding
+index_artifacts/        index.npy, index_chunks.json, bm25.pkl  (ב-git, נטען בזמן ריצה)
+data/                   pages.sqlite, raw/, clean/, chunks.jsonl, embeddings_cache.sqlite  (לא ב-git)
 ```

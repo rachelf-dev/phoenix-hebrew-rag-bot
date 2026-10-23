@@ -1,4 +1,4 @@
-# Render Blueprint: Web Service using the repo Dockerfile (see Render dashboard if not using Blueprint).
+# Render Blueprint: Docker web service. Health checks /health; index ships in the image.
 services:
   - type: web
     name: phoenix-rag

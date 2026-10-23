@@ -8,14 +8,17 @@ one JSONL line.
 
 from __future__ import annotations
 
+import copy
 import logging
+import re
+from collections import OrderedDict
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 
 from ..config import Config
 from ..indexing.embed import Embedder
 from ..indexing.retrieve import Hit, search
-from ..indexing.store import VectorIndex
+from ..retrieval.numpy_retriever import NumpyRetriever
 from ..logging_utils import log_query
 from .boundaries import Boundary, detect_with_history
 from .context import history_window, history_window_size, retrieval_query
@@ -28,6 +31,16 @@ from .sanitize import is_unintelligible_input, looks_like_injection, sanitize_hi
 log = logging.getLogger(__name__)
 
 _SPEC_TYPES = ("answered", "not_found", "personal_boundary", "out_of_scope")
+_LLM_CHUNK_CAP = 5
+_ANSWER_CACHE_MAX = 64
+_WS_RE = re.compile(r"\s+")
+_PUNCT_RE = re.compile(r"[^\w\s]+", re.UNICODE)
+
+
+def normalize_cache_key(question: str) -> str:
+    """Trim, collapse whitespace, strip punctuation — cache key for identical questions."""
+    text = _WS_RE.sub(" ", (question or "").strip())
+    return _PUNCT_RE.sub("", text).casefold()
 
 
 @dataclass
@@ -93,17 +106,18 @@ class _PreparedAsk:
 
 
 class Pipeline:
-    """Load the Gemini embedder + Chroma once, then answer many questions."""
+    """Load the Gemini embedder + NumPy index once, then answer many questions."""
 
     def __init__(self, cfg: Config):
         self.cfg = cfg
         self._embedder: Embedder | None = None
-        self._index: VectorIndex | None = None
+        self._index: NumpyRetriever | None = None
+        self._answer_cache: OrderedDict[str, Answer] = OrderedDict()
 
-    def ensure(self) -> tuple[Embedder, VectorIndex]:
+    def ensure(self) -> tuple[Embedder, NumpyRetriever]:
         if self._embedder is None:
             self._embedder = Embedder.from_config(self.cfg)
-            self._index = VectorIndex(self.cfg, self._embedder, recreate_on_mismatch=False)
+            self._index = NumpyRetriever.open(self.cfg, self._embedder)
         assert self._index is not None
         return self._embedder, self._index
 
@@ -251,16 +265,17 @@ class Pipeline:
                 prep.rewritten
                 + "\n\nענה רק מה כתוב באתר באופן כללי, בלי המלצה אישית ובלי התייחסות לפוליסה ספציפית."
             )
+        llm_hits = hits[:_LLM_CHUNK_CAP]
         try:
             data = generate_answer(
-                gen_q, hits, cfg, history=prep.history, original=prep.question,
+                gen_q, llm_hits, cfg, history=prep.history, original=prep.question,
             )
         except Exception as exc:
             log.warning("Gemini generate failed; soft-fail to not_found: %s", str(exc)[:300])
             if is_claim_sla_question(prep.question):
                 data = {"status": "not_found", "answer": "", "citation_urls": []}
             else:
-                fallback = grounded_action_fallback(prep.rewritten, hits, history=prep.history)
+                fallback = grounded_action_fallback(prep.rewritten, llm_hits, history=prep.history)
                 data = fallback or {"status": "not_found", "answer": "", "citation_urls": []}
         gen_status = data["status"]
         text = (data.get("answer") or "").strip()
@@ -299,12 +314,41 @@ class Pipeline:
             boundary=bound.kind,
         )
 
+    def _cache_get(self, question: str, history: list[dict[str, str]] | None) -> Answer | None:
+        if history:
+            return None
+        key = normalize_cache_key(question)
+        if not key:
+            return None
+        cached = self._answer_cache.get(key)
+        if cached is None:
+            return None
+        self._answer_cache.move_to_end(key)
+        return copy.copy(cached)
+
+    def _cache_put(self, question: str, history: list[dict[str, str]] | None, ans: Answer) -> None:
+        if history:
+            return
+        key = normalize_cache_key(question)
+        if not key:
+            return
+        self._answer_cache[key] = copy.copy(ans)
+        self._answer_cache.move_to_end(key)
+        while len(self._answer_cache) > _ANSWER_CACHE_MAX:
+            self._answer_cache.popitem(last=False)
+
     def ask(self, question: str, *, history: list[dict[str, str]] | None = None,
             rerank: bool | None = None, rewrite: bool | None = None) -> Answer:
+        cached = self._cache_get(question, history)
+        if cached is not None:
+            return cached
         prep = self._prepare(question, history=history, rerank=rerank, rewrite=rewrite)
         if prep.early is not None:
-            return self._finish(prep.early)
-        return self._finish(self._complete(prep))
+            ans = self._finish(prep.early)
+        else:
+            ans = self._finish(self._complete(prep))
+        self._cache_put(question, history, ans)
+        return ans
 
     def ask_events(
         self,
@@ -316,12 +360,20 @@ class Pipeline:
     ) -> Iterator[tuple[str, Answer | dict[str, str]]]:
         """Yield ('status', {stage}) then ('done', Answer) for the SSE chat path."""
         yield ("status", {"stage": "searching"})
+        cached = self._cache_get(question, history)
+        if cached is not None:
+            yield ("done", cached)
+            return
         prep = self._prepare(question, history=history, rerank=rerank, rewrite=rewrite)
         if prep.early is not None:
-            yield ("done", self._finish(prep.early))
+            ans = self._finish(prep.early)
+            self._cache_put(question, history, ans)
+            yield ("done", ans)
             return
         yield ("status", {"stage": "generating"})
-        yield ("done", self._finish(self._complete(prep)))
+        ans = self._finish(self._complete(prep))
+        self._cache_put(question, history, ans)
+        yield ("done", ans)
 
 
 def format_cli(ans: Answer, cfg: Config) -> str:

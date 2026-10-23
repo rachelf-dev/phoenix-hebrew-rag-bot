@@ -1,9 +1,8 @@
-# Pre-flight for Docker/Render: ensure GEMINI_API_KEY, build Chroma/BM25 if missing, then exec the server.
-"""Usage: check_deploy_ready.py [command ...] — exits 1 if deploy prerequisites are missing."""
+# Pre-flight for Docker/Render: require GEMINI_API_KEY and the three index_artifacts files, then exec the server.
+"""Never embeds documents. Fails fast if the prebuilt index is missing from the image."""
 
 from __future__ import annotations
 
-import logging
 import os
 import sys
 from pathlib import Path
@@ -31,40 +30,33 @@ def _fail(msg: str) -> None:
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
-
+    from phoenix_rag.config import load_config
     from phoenix_rag.gemini_keys import gemini_keys
 
-    if not gemini_keys():
-        _fail("GEMINI_API_KEY is not set (Render/Railway → Environment)")
-
-    from phoenix_rag.config import load_config
-    from phoenix_rag.indexing.bootstrap import ensure_vector_index, vector_index_ready
-
     cfg = load_config()
-    cfg.ensure_dirs()
+    if not gemini_keys():
+        _fail("GEMINI_API_KEY is not set (Render → Environment, or a local .env)")
+    required = (
+        ("index.npy", cfg.index_npy_path),
+        ("index_chunks.json", cfg.index_chunks_path),
+        ("bm25.pkl", cfg.bm25_path),
+    )
+    missing = [f"{name} ({path})" for name, path in required if not path.is_file()]
+    if missing:
+        _fail(
+            "prebuilt index missing: "
+            + "; ".join(missing)
+            + ". Copy index.npy, index_chunks.json and bm25.pkl into index_artifacts/ "
+            "before building the image. The server never embeds documents."
+        )
 
-    if vector_index_ready(cfg):
-        print("vector index OK")
-    else:
-        has_chunks = cfg.chunks_path.is_file() and cfg.chunks_path.stat().st_size > 0
-        has_clean = cfg.clean_dir.is_dir() and any(cfg.clean_dir.glob("*.json"))
-        if not has_chunks and not has_clean:
-            _fail(
-                f"missing index source: {cfg.chunks_path} (and no JSON under {cfg.clean_dir}). "
-                "Docker image must COPY data/chunks.jsonl into /app/data/."
-            )
-        print("vector index missing — building from chunks/clean (this may take a long time on first boot)", flush=True)
-        try:
-            ensure_vector_index(cfg)
-        except Exception as exc:
-            _fail(str(exc))
-        if not vector_index_ready(cfg):
-            _fail("index build finished but vector store is still empty")
-        print("vector index build complete")
+    print(
+        f"deploy checks OK (gemini key present, index files in {cfg.index_npy_path.parent})",
+        flush=True,
+    )
+    os.environ.setdefault("PHOENIX_RUNTIME", "1")
 
     if len(sys.argv) <= 1:
-        print("deploy checks OK")
         return
 
     os.execvpe(sys.argv[1], sys.argv[1:], os.environ)
