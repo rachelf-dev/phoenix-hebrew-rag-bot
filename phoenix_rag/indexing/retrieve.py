@@ -84,7 +84,7 @@ def _hits_from_ranked(
 
 def search(
     index: NumpyRetriever,
-    embedder: Embedder,
+    embedder: Embedder | None,
     question: str,
     *,
     top_k: int = 12,
@@ -92,9 +92,18 @@ def search(
     threshold: float = 0.0,
     max_per_url: int = 2,
 ) -> list[Hit]:
-    """Hybrid search; `threshold` is an RRF floor (0.0 until Day-4 calibration)."""
+    """Hybrid or BM25-only search; `threshold` is an RRF floor (0.0 until Day-4 calibration)."""
     pool = max(top_k * 2, 40)
     max_per_url = max(1, int(max_per_url))
+
+    if index.cfg.retrieval_mode == "bm25":
+        ranked = index.lexical_query(question, pool)
+        return _hits_from_ranked(
+            index, ranked, top_k=top_k, threshold=threshold, max_per_url=max_per_url,
+        )
+
+    if embedder is None:
+        raise RuntimeError("hybrid retrieval needs an embedder")
 
     try:
         qvec = embedder.encode_query(question)

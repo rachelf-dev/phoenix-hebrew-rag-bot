@@ -79,8 +79,9 @@ vector_store:
   collection: fnx_pages
 
 retrieval:
+  mode: bm25                 # bm25 | hybrid; override with RETRIEVAL_MODE. bm25 skips query embed and index.npy
   top_k: 12
-  hybrid: true               # semantic + BM25, fused with RRF, then Cohere Rerank
+  hybrid: true               # used when mode=hybrid: semantic + BM25, fused with RRF, then Cohere Rerank
   relevance_threshold: 0.0   # keep 0.0 so focused follow-ups are not dropped as weak
   max_per_url: 2             # URL dedupe in hybrid retrieval
   max_question_chars: 1000   # cap + strip control chars before rewrite / RAG / Gemini

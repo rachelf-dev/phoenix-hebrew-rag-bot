@@ -88,6 +88,12 @@ class Config:
         return self.raw["retrieval"]
 
     @property
+    def retrieval_mode(self) -> str:
+        """bm25 (default) or hybrid. Invalid values fall back to bm25."""
+        mode = str(self.retrieval.get("mode") or "bm25").strip().lower()
+        return mode if mode in ("bm25", "hybrid") else "bm25"
+
+    @property
     def llm(self) -> dict[str, Any]:
         return self.raw["llm"]
 
@@ -124,4 +130,6 @@ def load_config(config_path: Path | None = None, seeds_path: Path | None = None)
         raw.setdefault("llm", {})["model"] = os.environ["LLM_MODEL"]
     if os.getenv("EMBEDDING_MODEL"):
         raw.setdefault("embedding", {})["model"] = os.environ["EMBEDDING_MODEL"]
+    if os.getenv("RETRIEVAL_MODE"):
+        raw.setdefault("retrieval", {})["mode"] = os.environ["RETRIEVAL_MODE"].strip().lower()
     return Config(raw, load_seeds(seeds_path))

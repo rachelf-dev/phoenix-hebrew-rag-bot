@@ -10,3 +10,5 @@ models/
 
 # Crawl / clean / local Chroma stay out of git. Runtime index is index_artifacts/.
 data/
+index_artifacts/index.new.npy
+index_artifacts/index.e5_backup.npy

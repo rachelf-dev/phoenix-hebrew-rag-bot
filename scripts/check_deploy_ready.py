@@ -36,22 +36,24 @@ def main() -> None:
     cfg = load_config()
     if not gemini_keys():
         _fail("GEMINI_API_KEY is not set (Render → Environment, or a local .env)")
-    required = (
-        ("index.npy", cfg.index_npy_path),
+    mode = cfg.retrieval_mode
+    required = [
         ("index_chunks.json", cfg.index_chunks_path),
         ("bm25.pkl", cfg.bm25_path),
-    )
+    ]
+    if mode == "hybrid":
+        required.insert(0, ("index.npy", cfg.index_npy_path))
     missing = [f"{name} ({path})" for name, path in required if not path.is_file()]
     if missing:
+        need = "index_chunks.json and bm25.pkl" if mode == "bm25" else "index.npy, index_chunks.json and bm25.pkl"
         _fail(
             "prebuilt index missing: "
             + "; ".join(missing)
-            + ". Copy index.npy, index_chunks.json and bm25.pkl into index_artifacts/ "
-            "before building the image. The server never embeds documents."
+            + f". Copy {need} into index_artifacts/ before building the image."
         )
 
     print(
-        f"deploy checks OK (gemini key present, index files in {cfg.index_npy_path.parent})",
+        f"deploy checks OK (mode={mode}, gemini key present, files in {cfg.index_chunks_path.parent})",
         flush=True,
     )
     os.environ.setdefault("PHOENIX_RUNTIME", "1")

@@ -45,22 +45,14 @@ class NumpyRetriever:
         self._bm25_urls: list[str] = []
 
     def load(self) -> None:
-        if self._matrix is not None:
+        if self._chunks is not None:
             return
-        if not self.index_npy_path.is_file():
-            raise FileNotFoundError(
-                f"missing vector index: {self.index_npy_path} "
-                "(copy index.npy into index_artifacts/; the server never embeds documents)"
-            )
         if not self.index_chunks_path.is_file():
             raise FileNotFoundError(
                 f"missing chunk metadata: {self.index_chunks_path} "
                 "(copy index_chunks.json into index_artifacts/)"
             )
 
-        matrix = np.asarray(np.load(self.index_npy_path), dtype=np.float32)
-        if matrix.ndim != 2:
-            raise ValueError(f"index.npy must be 2-D, got shape {matrix.shape}")
         raw = json.loads(self.index_chunks_path.read_text(encoding="utf-8"))
         if not isinstance(raw, list):
             raise ValueError("index_chunks.json must be a JSON array")
@@ -79,22 +71,38 @@ class NumpyRetriever:
                     embed_text=str(row.get("embed_text") or ""),
                 )
             )
-        if len(chunks) != matrix.shape[0]:
-            raise ValueError(
-                f"index row count {matrix.shape[0]} != chunks {len(chunks)} "
-                f"({self.index_npy_path.name} / {self.index_chunks_path.name})"
-            )
-        self._matrix = matrix
+        bm25_only = self.cfg.retrieval_mode == "bm25"
+        if bm25_only:
+            self._matrix = None
+        else:
+            if not self.index_npy_path.is_file():
+                raise FileNotFoundError(
+                    f"missing vector index: {self.index_npy_path} "
+                    "(copy index.npy into index_artifacts/; the server never embeds documents)"
+                )
+            matrix = np.asarray(np.load(self.index_npy_path), dtype=np.float32)
+            if matrix.ndim != 2:
+                raise ValueError(f"index.npy must be 2-D, got shape {matrix.shape}")
+            if len(chunks) != matrix.shape[0]:
+                raise ValueError(
+                    f"index row count {matrix.shape[0]} != chunks {len(chunks)} "
+                    f"({self.index_npy_path.name} / {self.index_chunks_path.name})"
+                )
+            self._matrix = matrix
         self._chunks = chunks
         self._id_to_row = {c.chunk_id: i for i, c in enumerate(chunks)}
         self._bm25, self._bm25_ids, self._bm25_urls = load_or_rebuild_bm25(self.bm25_path, chunks)
-        log.info(
-            "numpy index loaded shape=%s dim=%d path=%s bm25_docs=%d",
-            matrix.shape,
-            matrix.shape[1],
-            self.index_npy_path,
-            len(self._bm25_ids),
-        )
+        if bm25_only:
+            log.info("bm25 index loaded docs=%d path=%s (index.npy not loaded)", len(self._bm25_ids), self.bm25_path)
+        else:
+            assert self._matrix is not None
+            log.info(
+                "numpy index loaded shape=%s dim=%d path=%s bm25_docs=%d",
+                self._matrix.shape,
+                self._matrix.shape[1],
+                self.index_npy_path,
+                len(self._bm25_ids),
+            )
 
     @property
     def has_bm25(self) -> bool:

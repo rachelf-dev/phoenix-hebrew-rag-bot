@@ -114,11 +114,11 @@ class Pipeline:
         self._index: NumpyRetriever | None = None
         self._answer_cache: OrderedDict[str, Answer] = OrderedDict()
 
-    def ensure(self) -> tuple[Embedder, NumpyRetriever]:
-        if self._embedder is None:
-            self._embedder = Embedder.from_config(self.cfg)
-            self._index = NumpyRetriever.open(self.cfg, self._embedder)
-        assert self._index is not None
+    def ensure(self) -> tuple[Embedder | None, NumpyRetriever]:
+        if self._index is None:
+            self._index = NumpyRetriever.open(self.cfg)
+            if self.cfg.retrieval_mode == "hybrid":
+                self._embedder = Embedder.from_config(self.cfg)
         return self._embedder, self._index
 
     def _max_question_chars(self) -> int:
