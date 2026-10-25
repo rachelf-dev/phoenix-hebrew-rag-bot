@@ -17,6 +17,7 @@ import httpx
 from ..indexing.hebrew_lex import tokenize
 from ..indexing.retrieve import Hit
 from .context import claim_path_markers, extract_thread_slots
+from .sanitize import effective_user_question
 
 _FORBIDDEN_APT = (
     "/claims-liability-insurance/",
@@ -371,6 +372,73 @@ def _canonical_product_hits(question: str, hits: list[Hit]) -> list[Hit]:
         if tesla:
             return tesla
     return chosen
+
+
+def _user_affirms_weather_damage(question: str, history: list[dict[str, str]] | None) -> bool:
+    user = effective_user_question(question or "")
+    blob = user
+    for t in history or []:
+        role = (t.get("role") or "").strip().lower()
+        if role in ("human", "client", "user"):
+            blob = f"{blob} {t.get('content') or ''}"
+    affirm = any(p in blob for p in ("ממזג אוויר", "ממזג אויר", "מזג אוויר", "נזקי מזג אוויר", "כתוצאה ממזג"))
+    if not affirm:
+        return False
+    if any(p in user for p in ("אינו ממזג", "לא ממזג", "לא מזג", "אינו כתוצאה ממזג")):
+        return False
+    return True
+
+
+def _user_denies_weather_damage(question: str, history: list[dict[str, str]] | None) -> bool:
+    user = effective_user_question(question or "")
+    return any(
+        p in user
+        for p in ("אינו ממזג", "לא ממזג", "לא מזג אוויר", "לא כתוצאה ממזג", "אינו כתוצאה ממזג")
+    )
+
+
+def _is_weather_branch_hit(h: Hit) -> bool:
+    t = (h.text or "")[:220]
+    return "כתוצאה מנזקי מזג" in t and "אינו" not in t[:80]
+
+
+def _is_non_weather_branch_hit(h: Hit) -> bool:
+    return "אינו כתוצאה מנזקי מזג" in (h.text or "")
+
+
+def reorder_conditional_branch_hits(
+    question: str,
+    hits: list[Hit],
+    history: list[dict[str, str]] | None = None,
+) -> list[Hit]:
+    """On water-heater decision pages, rank the branch that matches the user's stated condition first."""
+    if not hits:
+        return hits
+    affirm = _user_affirms_weather_damage(question, history)
+    deny = _user_denies_weather_damage(question, history)
+    if not affirm and not deny:
+        return hits
+    front: list[Hit] = []
+    mid: list[Hit] = []
+    back: list[Hit] = []
+    for h in hits:
+        path = _url_path(h)
+        if "water-heater" not in path:
+            mid.append(h)
+            continue
+        if affirm and _is_weather_branch_hit(h):
+            front.append(h)
+        elif affirm and _is_non_weather_branch_hit(h):
+            back.append(h)
+        elif deny and _is_non_weather_branch_hit(h):
+            front.append(h)
+        elif deny and _is_weather_branch_hit(h):
+            back.append(h)
+        else:
+            mid.append(h)
+    if not front:
+        return hits
+    return front + mid + back
 
 
 def demote_mismatched_paths(

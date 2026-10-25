@@ -188,6 +188,16 @@ def _extract_links(main: Tag, page_url: str) -> list[Link]:
     return list(by_href.values())
 
 
+def _is_site_wide_contacts(tag: Tag) -> bool:
+    """Drop only the site-wide contact matrix, not per-page 'נשמח לשוחח' blocks."""
+    text = normalize_text(tag.get_text(" "))
+    if "כל הדרכים לדבר איתנו" in text or "כל הדרכים ליצור איתנו קשר" in text:
+        return True
+    if text.count("054-9893455") >= 4 and "מוקד שירות" in text:
+        return True
+    return False
+
+
 def _drop_noise(main: Tag, cfg: Config) -> None:
     for sel in cfg.cleaning.get("drop_selectors", []):
         for t in main.select(sel):
@@ -197,6 +207,10 @@ def _drop_noise(main: Tag, cfg: Config) -> None:
         if t.decomposed or t.attrs is None:
             continue
         classes = " ".join(t.get("class", []))
+        if "contacts-section" in classes:
+            if _is_site_wide_contacts(t):
+                t.decompose()
+            continue
         if any(dc in classes for dc in drop_classes):
             t.decompose()
     # Mobile/desktop duplicates: responsive variants hidden on large screens are copies.

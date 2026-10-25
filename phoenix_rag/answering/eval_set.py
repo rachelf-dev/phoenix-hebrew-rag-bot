@@ -29,6 +29,7 @@ class EvalQuestion:
     expected_answer_type: str
     expected_url_contains: list[str] = field(default_factory=list)
     forbidden_url_contains: list[str] = field(default_factory=list)
+    forbidden_answer_contains: list[str] = field(default_factory=list)
     required_facts: list[str] = field(default_factory=list)
     history: list[dict[str, str]] = field(default_factory=list)
     hidden: bool = False
@@ -85,6 +86,9 @@ def load_questions(path: Path, *, include_hidden: bool = True) -> list[EvalQuest
         forbidden = raw.get("forbidden_url_contains") or []
         if isinstance(forbidden, str):
             forbidden = [forbidden]
+        forbidden_ans = raw.get("forbidden_answer_contains") or []
+        if isinstance(forbidden_ans, str):
+            forbidden_ans = [forbidden_ans]
         out.append(
             EvalQuestion(
                 id=str(raw.get("id") or f"q{len(out)+1:02d}"),
@@ -93,6 +97,7 @@ def load_questions(path: Path, *, include_hidden: bool = True) -> list[EvalQuest
                 expected_answer_type=str(raw.get("expected_answer_type") or "answered"),
                 expected_url_contains=[u.rstrip("/") for u in urls if u],
                 forbidden_url_contains=[u.rstrip("/") for u in forbidden if u],
+                forbidden_answer_contains=[str(x) for x in forbidden_ans if x],
                 required_facts=list(raw.get("required_facts") or []),
                 history=list(raw.get("history") or []),
                 hidden=bool(raw.get("hidden")),
@@ -173,9 +178,27 @@ def score_question(q: EvalQuestion, ans: Answer, *, retrieval_hit: bool, top_rrf
         citation_ok = not _url_forbidden(q.forbidden_url_contains, cites)
     halluc = _possible_hallucination(q, ans)
 
+    answer_text = (ans.text or "").lower()
+    facts_ok = True
+    if q.required_facts and ans.status == "answered":
+        facts_ok = all(f.lower() in answer_text for f in q.required_facts)
+    forbidden_ans = False
+    if q.forbidden_answer_contains and ans.status == "answered":
+        forbidden_ans = any(f.lower() in answer_text for f in q.forbidden_answer_contains)
+
     if exp == "answered":
-        ok = ans.status in ("answered", *BOUNDARY_STATUSES) and citation_ok and not halluc
+        ok = (
+            ans.status in ("answered", *BOUNDARY_STATUSES)
+            and citation_ok
+            and not halluc
+            and facts_ok
+            and not forbidden_ans
+        )
         detail = "cited " + (cites[0] if cites else "NONE")
+        if not facts_ok:
+            detail += " missing required_facts"
+        if forbidden_ans:
+            detail += " forbidden phrase in answer"
     elif exp in REFUSAL_STATUSES:
         ok = ans.status == exp or (exp == "not_found" and ans.status in REFUSAL_STATUSES)
         ok = ok and not halluc

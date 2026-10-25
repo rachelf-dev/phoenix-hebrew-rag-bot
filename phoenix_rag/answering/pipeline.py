@@ -24,7 +24,9 @@ from .boundaries import Boundary, detect_with_history
 from .context import history_window, history_window_size, retrieval_query
 from .context import is_claim_sla_question
 from .generate import generate_answer, grounded_action_fallback, rewrite_question
+from .page_context import expand_same_page_hits
 from .rerank import demote_mismatched_paths, drop_weak_hits, filter_hits_for_question, promote_topic_hits
+from .rerank import reorder_conditional_branch_hits
 from .rerank import rerank as cohere_rerank
 from .sanitize import is_unintelligible_input, looks_like_injection, sanitize_history, sanitize_question
 
@@ -229,6 +231,7 @@ class Pipeline:
             max_per_url=int(rcfg.get("max_per_url") or 2),
         )
         hits = demote_mismatched_paths(search_q, hits, history=history)
+        hybrid_hits = list(hits)
         used_rerank = False
         keep = int((rcfg.get("rerank") or {}).get("top_n") or 5)
         if do_rerank and hits:
@@ -246,9 +249,14 @@ class Pipeline:
             except (TypeError, ValueError):
                 min_score = 0.0
             hits = drop_weak_hits(hits, refuse_below=min_score if used_rerank else 0.0)
+            if not hits:
+                hits = hybrid_hits
+                used_rerank = False
             hits = demote_mismatched_paths(search_q, hits, history=history)
         hits = filter_hits_for_question(search_q, hits, history=history)
-        hits = promote_topic_hits(search_q, hits, history=history)[:keep]
+        hits = promote_topic_hits(search_q, hits, history=history)
+        hits = reorder_conditional_branch_hits(q, hits, history=history)
+        hits = hits[:keep]
         return _PreparedAsk(
             question=q, rewritten=rewritten, search_q=search_q, history=history,
             bound=bound, hits=hits, used_rerank=used_rerank,
@@ -265,7 +273,10 @@ class Pipeline:
                 prep.rewritten
                 + "\n\nענה רק מה כתוב באתר באופן כללי, בלי המלצה אישית ובלי התייחסות לפוליסה ספציפית."
             )
-        llm_hits = hits[:_LLM_CHUNK_CAP]
+        _, index = self.ensure()
+        llm_hits = expand_same_page_hits(hits, index)
+        if len(llm_hits) <= 1:
+            llm_hits = hits[:_LLM_CHUNK_CAP]
         try:
             data = generate_answer(
                 gen_q, llm_hits, cfg, history=prep.history, original=prep.question,

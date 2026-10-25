@@ -120,6 +120,21 @@ class NumpyRetriever:
         i = self._id_to_row.get(chunk_id)
         return self._chunks[i] if i is not None else None
 
+    def sorted_chunks_for_url(self, url: str) -> list[StoredChunk]:
+        """All chunks for one page URL in index order (chunk_id sequence)."""
+        self.load()
+        assert self._chunks is not None
+        key = (url or "").rstrip("/")
+        if not key:
+            return []
+        rows = [
+            c
+            for c in self._chunks
+            if (c.display_url or c.url or "").rstrip("/") == key
+        ]
+        rows.sort(key=lambda c: c.chunk_id)
+        return rows
+
     def semantic_query(self, embedding: list[float], k: int) -> list[tuple[str, float]]:
         """Return (chunk_id, cosine score) for top-k rows."""
         self.load()

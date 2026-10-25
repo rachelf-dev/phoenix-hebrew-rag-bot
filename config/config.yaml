@@ -26,7 +26,7 @@ cleaning:
   main_selector: "main#main"
   # section-item blocks that are site chrome or lead-generation widgets, not informational content
   drop_section_classes:
-    - contacts-section          # "כל הדרכים לדבר איתנו" repeated on every page
+    # contacts-section: dropped selectively in clean.py (site-wide matrix only)
     - lead-popup-form
     - graphic-element
     - locating-service-providers # service-provider locator widget (links only; we keep the links as metadata)

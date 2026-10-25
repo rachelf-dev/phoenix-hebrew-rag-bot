@@ -10,7 +10,8 @@ import re
 
 DEFAULT_MAX_QUESTION_CHARS = 1000
 
-_QUOTE_PREFIX = "בהתייחס לציטוט הבא מהתשובה:"
+QUOTE_PREFIX = "בהתייחס לציטוט הבא מהתשובה:"
+_QUOTE_PREFIX = QUOTE_PREFIX
 
 # Enough structure to treat as a real question (not random letters).
 _QUESTION_SHAPE = (
@@ -102,6 +103,11 @@ def sanitize_text(text: str, *, max_chars: int = DEFAULT_MAX_QUESTION_CHARS) -> 
 def sanitize_question(text: str, *, max_chars: int = DEFAULT_MAX_QUESTION_CHARS) -> str:
     """Normalize the current user question before boundaries, rewrite, and RAG."""
     return sanitize_text(text, max_chars=max_chars)
+
+
+def has_quote_wrapper(text: str) -> bool:
+    """True when the chat UI wrapped a selection from the assistant reply."""
+    return (text or "").strip().startswith(_QUOTE_PREFIX)
 
 
 def effective_user_question(text: str) -> str:

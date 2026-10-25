@@ -15,6 +15,7 @@ from phoenix_rag.answering.context import (  # noqa: E402
     claim_path_markers,
     extract_thread_slots,
     heuristic_rewrite,
+    retrieval_query,
 )
 from phoenix_rag.answering.rerank import path_matches_question  # noqa: E402
 from phoenix_rag.indexing.retrieve import Hit  # noqa: E402
@@ -56,6 +57,18 @@ class RewriteTests(unittest.TestCase):
         out = heuristic_rewrite(WEATHER_FU, WEATHER_FU, SOLAR_HISTORY)
         self.assertIn("דוד", out)
         self.assertIn("מזג", out)
+
+
+class RetrievalQueryTests(unittest.TestCase):
+    def test_quote_followup_uses_prior_user_not_bot_quote(self):
+        quoted = (
+            "בהתייחס לציטוט הבא מהתשובה: «במידה והנזק לדוד השמש אינו כתוצאה מנזקי מזג אויר»\n\n"
+            "הנזק הוא ממזג אויר"
+        )
+        q = retrieval_query(quoted, SOLAR_HISTORY)
+        self.assertIn("נשבר", q)
+        self.assertIn("ממזג", q)
+        self.assertNotIn("אינו כתוצאה", q)
 
 
 class MarkerAndGateTests(unittest.TestCase):

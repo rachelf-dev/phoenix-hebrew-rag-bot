@@ -12,3 +12,4 @@ models/
 data/
 index_artifacts/index.new.npy
 index_artifacts/index.e5_backup.npy
+index_artifacts_backup/

@@ -330,9 +330,20 @@ def is_followup(question: str, history: list[dict[str, str]] | None = None) -> b
     return False
 
 
+def _prior_user_question(history: list[dict[str, str]] | None) -> str:
+    for t in reversed(history or []):
+        role = (t.get("role") or "").strip().lower()
+        if role in ("human", "client", "user"):
+            return (t.get("content") or "").strip()
+    return ""
+
+
 def topic_anchors(history: list[dict[str, str]] | None, question: str = "") -> list[str]:
     """Specific insurance phrases for retrieval boost (no generic 'כיסוי' / 'תביעה')."""
-    blob = _conversation_blob(history, question)
+    from .sanitize import effective_user_question
+
+    q = effective_user_question(question)
+    blob = _user_blob(history, q)
     found: list[str] = []
     for phrase in _TOPIC_PHRASES:
         if phrase in blob and phrase not in found:
@@ -495,15 +506,28 @@ def heuristic_rewrite(original: str, rewritten: str, history: list[dict[str, str
 
 def retrieval_query(rewritten: str, history: list[dict[str, str]] | None) -> str:
     """Search text: standalone rewrite plus only specific missing anchors."""
-    from .sanitize import is_unintelligible_input
+    from .sanitize import effective_user_question, has_quote_wrapper, is_unintelligible_input
 
-    q = (rewritten or "").strip()
-    if not q or is_unintelligible_input(q):
-        return q
+    raw = (rewritten or "").strip()
+    if not raw or is_unintelligible_input(raw):
+        return raw
     turns = history_window(history)
+    user_new = effective_user_question(raw)
+    if has_quote_wrapper(raw) and turns:
+        prior = _prior_user_question(turns)
+        q = f"{prior} {user_new}".strip() if prior else user_new
+        if not q:
+            q = raw
+    else:
+        q = raw
+    low = q.casefold()
+    if any(w in low for w in ("גרר", "גריר", "שירותי דרך")) and any(
+        w in low for w in ("מספר", "טלפון", "מתקשר", "להתקשר", "לחייג", "חיוג")
+    ):
+        q = f"{q} שירותי גרירה ושירותי דרך בביטוח רכב car_towing_services"
     if not turns:
         return q[:900]
-    missing = [t for t in topic_anchors(turns, q) if t not in q]
+    missing = [t for t in topic_anchors(turns, user_new or q) if t not in q]
     if not missing:
         return q[:900]
     return f"{q} {' '.join(missing[:6])}".strip()[:900]
@@ -543,4 +567,6 @@ def claim_path_markers(question: str, history: list[dict[str, str]] | None = Non
             markers.append("/claims-customer-service/claims-appartment-insurance/")
     if slots.product == "ביטוח רכב" or "רכב" in blob:
         markers.append("/claims-customer-service/claims-car-insurance/")
+    if any(x in user_blob for x in ("גרר", "גריר", "שירותי דרך", "ניידת", "חילוץ")):
+        markers.append("/customer-service/car-insurance/car_towing_services/")
     return list(dict.fromkeys(markers))
